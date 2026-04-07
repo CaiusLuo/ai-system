@@ -1,10 +1,10 @@
-package com.caius.gatewayservice;
+package com.caius.javabackend;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class GatewayServiceApplicationTests {
+class JavaBackendApplicationTests {
 
     @Test
     void contextLoads() {
