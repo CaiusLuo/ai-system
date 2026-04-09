@@ -27,6 +27,7 @@ public class GlobalExceptionHandler {
         String message = e.getBindingResult().getAllErrors().get(0).getDefaultMessage();
         log.error("参数校验异常: {}", message);
         return Result.error(400, message);
+
     }
 
     @ExceptionHandler(BindException.class)

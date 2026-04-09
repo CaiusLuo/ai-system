@@ -7,13 +7,16 @@ spring:
     redis:
       host: localhost
       port: 6379
+      password: 123456
       database: 0
       timeout: 5000ms
       lettuce:
         pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
+          max-active: 20      # 最大连接数
+          max-idle: 10        # 最大空闲连接
+          min-idle: 5         # 最小空闲连接
+          max-wait: -1ms      # 无限等待
+          time-between-eviction-runs: 60000ms  # 60秒检测一次
 
 # MyBatis-Plus SQL 日志输出（仅开发环境）
 mybatis-plus:
@@ -34,9 +37,12 @@ jwt:
 
 # Python Agent 服务配置
 python-agent:
-  url: http://localhost:5000
+  url: http://localhost:5001
   chat-endpoint: /api/chat
+  stream-endpoint: /api/v1/chat/stream
   timeout: 30000  # 30秒
+  stream-timeout: 120000  # 流式请求 120 秒
+  heartbeat-interval: 15000  # 心跳间隔 15 秒
   retry:
     max-attempts: 3
     delay: 1000   # 1秒

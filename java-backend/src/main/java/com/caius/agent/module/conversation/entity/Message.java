@@ -23,6 +23,11 @@ public class Message {
 
     private String content;
 
+    /**
+     * Agent 总结信息（title 字段）
+     */
+    private String title;
+
     @TableLogic
     private Integer deleted;
 

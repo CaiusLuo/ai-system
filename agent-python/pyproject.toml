@@ -1,0 +1,20 @@
+[project]
+name = "agent-python"
+version = "0.1.0"
+description = "求职Agent - 基于 FastAPI + LangGraph + LangChain + DeepSeek"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.104.1,<1.0",
+    "uvicorn>=0.24.0,<1.0",
+    "langchain>=0.1.0,<1.0",
+    "langchain-openai>=0.0.5,<1.0",
+    "langgraph>=0.0.20,<1.0",
+    "langsmith>=0.1.0,<1.0",
+    "httpx>=0.25.1,<1.0",
+    "pydantic>=2.5.0,<3.0",
+    "pydantic-settings>=2.1.0,<3.0",
+    "python-dotenv>=1.0.0,<2.0",
+]
+
+[project.scripts]

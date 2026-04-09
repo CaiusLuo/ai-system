@@ -236,6 +236,137 @@ Authorization: Bearer {token}
 Authorization: Bearer {token}
 ```
 
+### Admin 用户管理接口
+
+> 注意：以下接口目前用于开发测试，生产环境需启用 JWT 认证
+
+#### GET /api/admin/users
+获取用户列表（分页+筛选）
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|-----|------|-----|------|
+| page | number | 否 | 页码（默认 1） |
+| pageSize | number | 否 | 每页数量（默认 10，最大 100） |
+| keyword | string | 否 | 搜索关键词（匹配用户名或邮箱） |
+| role | string | 否 | 角色筛选：`ADMIN` 或 `USER` |
+| status | string | 否 | 状态筛选：`ACTIVE` 或 `DISABLED` |
+
+**响应：**
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "username": "admin",
+        "email": "admin@example.com",
+        "role": "ADMIN",
+        "status": "ACTIVE",
+        "createdAt": "2024-01-15T10:30:00Z"
+      }
+    ],
+    "total": 100,
+    "page": 1,
+    "pageSize": 10
+  }
+}
+```
+
+#### POST /api/admin/users
+创建用户
+
+**请求体：**
+```json
+{
+  "username": "新用户名",
+  "email": "user@example.com",
+  "password": "密码（至少6位）",
+  "role": "USER",
+  "status": "ACTIVE"
+}
+```
+
+**响应：**
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "id": 13,
+    "username": "新用户名",
+    "email": "user@example.com",
+    "role": "USER",
+    "status": "ACTIVE",
+    "createdAt": "2024-07-20T10:00:00Z"
+  }
+}
+```
+
+#### PUT /api/admin/users/{id}
+更新用户
+
+**请求体：**
+```json
+{
+  "username": "更新后的用户名",
+  "email": "updated@example.com",
+  "password": "新密码（可选，留空则不修改）",
+  "role": "ADMIN",
+  "status": "ACTIVE"
+}
+```
+
+**响应：**
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "id": 1,
+    "username": "更新后的用户名",
+    "email": "updated@example.com",
+    "role": "ADMIN",
+    "status": "ACTIVE",
+    "createdAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+#### DELETE /api/admin/users/{id}
+删除用户（逻辑删除）
+
+**响应：**
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": null
+}
+```
+
+#### PATCH /api/admin/users/{id}/toggle-status
+切换用户状态（ACTIVE <-> DISABLED）
+
+**响应：**
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "id": 1,
+    "username": "用户名",
+    "email": "user@example.com",
+    "role": "USER",
+    "status": "DISABLED",
+    "createdAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
 ## 快速开始
 
 ### 环境要求

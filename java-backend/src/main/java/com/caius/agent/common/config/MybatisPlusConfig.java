@@ -1,7 +1,9 @@
 package com.caius.agent.common.config;
 
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
+import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import org.apache.ibatis.reflection.MetaObject;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.LocalDateTime;
@@ -11,6 +13,14 @@ import java.time.LocalDateTime;
  */
 @Configuration
 public class MybatisPlusConfig implements MetaObjectHandler {
+
+    /**
+     * MyBatis-Plus 插件配置
+     */
+    @Bean
+    public MybatisPlusInterceptor mybatisPlusInterceptor() {
+        return new MybatisPlusInterceptor();
+    }
 
     @Override
     public void insertFill(MetaObject metaObject) {
