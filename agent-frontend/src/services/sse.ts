@@ -5,6 +5,8 @@ export interface SSEChunkData {
   type: 'chunk';
   content: string;
   index: number;
+  reasoning?: string; // 思考过程内容
+  info?: string; // 额外信息（别名）
   conversationId?: number; // 首次响应可能包含 conversationId
 }
 
@@ -27,29 +29,61 @@ export type SSEEventData = SSEChunkData | SEDoneData | SEEErrorData | SEPingData
 // SSE 回调类型
 export type SSEHandlers = {
   onChunk?: (content: string, index: number) => void;
+  onReasoning?: (reasoning: string, index: number) => void; // 思考过程
   onDone?: (data: SEDoneData) => void;
   onError?: (error: SEEErrorData) => void;
   onConversationId?: (conversationId: number) => void; // 新增：提取 conversationId
 };
 
 /**
- * 解析 SSE 数据块
- * 支持格式：
- * - data: {"type": "chunk", "content": "hello"}
- * - data: {"type": "done", "total_tokens": 100}
- * - data: {"type": "error", "message": "error"}
+ * 解析完整的多行 SSE 事件块
+ * 支持标准 SSE 格式：
+ * event: chunk
+ * data: {"content": "hello"}
+ * 
+ * 也兼容简化格式：
+ * data: {"content": "hello"}
  */
-function parseSSEChunk(text: string): SSEEventData | null {
-  const trimmed = text.trim();
-  if (!trimmed || !trimmed.startsWith('data: ')) {
+function parseSSEBlock(block: string): SSEEventData | null {
+  const trimmed = block.trim();
+  if (!trimmed) return null;
+
+  let eventType = 'chunk'; // 默认事件类型
+  let dataStr = '';
+
+  // 按行分割
+  const lines = trimmed.split('\n');
+  for (const line of lines) {
+    const lineTrimmed = line.trim();
+    
+    if (lineTrimmed.startsWith('event: ')) {
+      eventType = lineTrimmed.slice(7).trim();
+    } else if (lineTrimmed.startsWith('data: ')) {
+      dataStr = lineTrimmed.slice(6);
+    } else if (lineTrimmed.startsWith('data:')) {
+      // 处理 "data:" 后面没有空格的情况
+      dataStr = lineTrimmed.slice(5);
+    }
+  }
+
+  // 如果没有找到 data，尝试直接解析整个块
+  if (!dataStr && trimmed.startsWith('data: ')) {
+    dataStr = trimmed.slice(6);
+  }
+
+  if (!dataStr) {
     return null;
   }
 
-  const jsonStr = trimmed.slice(6); // 移除 "data: " 前缀
   try {
-    return JSON.parse(jsonStr);
+    const parsed = JSON.parse(dataStr);
+    // 如果 JSON 中已有 type 字段，使用它；否则使用从 event: 行提取的
+    return {
+      type: parsed.type || eventType,
+      ...parsed,
+    };
   } catch (error) {
-    console.warn('[SSE] Failed to parse chunk:', jsonStr, error);
+    console.warn('[SSE] Failed to parse SSE block:', trimmed, error);
     return null;
   }
 }
@@ -124,8 +158,15 @@ export async function createSSEConnection(
   try {
     while (true) {
       const { done, value } = await reader.read();
-      
+
       if (done) {
+        // 处理剩余的 buffer
+        if (buffer.trim()) {
+          const eventData = parseSSEBlock(buffer);
+          if (eventData) {
+            dispatchSSEEvent(eventData, handlers);
+          }
+        }
         console.debug('[SSE] Stream ended');
         break;
       }
@@ -134,32 +175,17 @@ export async function createSSEConnection(
       const chunk = decoder.decode(value, { stream: true });
       buffer += chunk;
 
-      // 按行分割并解析
-      const lines = buffer.split('\n');
-      // 保留最后一个可能不完整的行
-      buffer = lines.pop() || '';
+      // 按 SSE 标准分隔符 \n\n 分割事件块
+      const blocks = buffer.split('\n\n');
+      // 保留最后一个可能不完整的块
+      buffer = blocks.pop() || '';
 
-      for (const line of lines) {
-        const eventData = parseSSEChunk(line);
+      for (const block of blocks) {
+        const eventData = parseSSEBlock(block);
         if (!eventData) {
           continue;
         }
-
-        if (eventData.type === 'chunk') {
-          handlers.onChunk?.(eventData.content, eventData.index);
-          
-          // 提取 conversationId（首次响应时）
-          if (eventData.conversationId) {
-            handlers.onConversationId?.(eventData.conversationId);
-          }
-        } else if (eventData.type === 'done') {
-          handlers.onDone?.(eventData as SEDoneData);
-        } else if (eventData.type === 'error') {
-          handlers.onError?.(eventData as SEEErrorData);
-        } else if (eventData.type === 'ping') {
-          // 忽略 ping 心跳
-          console.debug('[SSE] ping received');
-        }
+        dispatchSSEEvent(eventData, handlers);
       }
     }
   } catch (error) {
@@ -167,8 +193,35 @@ export async function createSSEConnection(
       console.debug('[SSE] Stream aborted');
       return;
     }
-    
+
     const errorMessage = error instanceof Error ? error.message : '读取流式数据失败';
     handlers.onError?.({ type: 'error', message: errorMessage });
+  }
+}
+
+/**
+ * 分发 SSE 事件到对应的处理器
+ */
+function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): void {
+  if (eventData.type === 'chunk') {
+    // 处理思考过程（reasoning 或 info 字段）
+    const reasoningContent = (eventData as SSEChunkData).reasoning || (eventData as SSEChunkData).info;
+    if (reasoningContent) {
+      handlers.onReasoning?.(reasoningContent, (eventData as SSEChunkData).index);
+    }
+
+    // 处理正式回复内容
+    handlers.onChunk?.((eventData as SSEChunkData).content, (eventData as SSEChunkData).index);
+
+    // 提取 conversationId（首次响应时）
+    if ((eventData as SSEChunkData).conversationId) {
+      handlers.onConversationId?.((eventData as SSEChunkData).conversationId!);
+    }
+  } else if (eventData.type === 'done') {
+    handlers.onDone?.(eventData as SEDoneData);
+  } else if (eventData.type === 'error') {
+    handlers.onError?.(eventData as SEEErrorData);
+  } else if (eventData.type === 'ping') {
+    console.debug('[SSE] ping received');
   }
 }

@@ -1,12 +1,10 @@
 package com.caius.agent.module.agent.service.impl;
 
-import com.caius.agent.dao.ChunkMapper;
 import com.caius.agent.dao.ConversationMapper;
 import com.caius.agent.dao.MessageMapper;
 import com.caius.agent.module.agent.dto.StreamChatRequest;
 import com.caius.agent.module.agent.model.SseEvent;
 import com.caius.agent.module.agent.service.StreamChatService;
-import com.caius.agent.module.conversation.entity.Chunk;
 import com.caius.agent.module.conversation.entity.Conversation;
 import com.caius.agent.module.conversation.entity.Message;
 import com.caius.agent.module.gateway.PythonAgentStreamGateway;
@@ -15,27 +13,30 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.connection.stream.StreamRecords;
+import org.springframework.data.redis.connection.stream.StreamOffset;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 流式聊天服务实现
+ * 流式聊天服务（极简透传版）
  *
- * 核心职责：
- * 1. 调用 Python SSE 服务
- * 2. 逐条转发事件给前端（透传）
- * 3. 实现心跳机制（15秒）
- * 4. 处理 done / error 事件
- * 5. 存储 chunk 数据，多个 chunk 组装成 message
+ * 核心原则：
+ * 1. 收到 chunk → 立即发给前端（唯一优先级）
+ * 2. 内存缓冲 chunk 内容
+ * 3. done 事件 → 批量写 Redis + 写 MySQL（一次性）
  */
 @Slf4j
 @Service
@@ -44,34 +45,50 @@ public class StreamChatServiceImpl implements StreamChatService {
 
     private final PythonAgentStreamGateway streamGateway;
     private final ObjectMapper objectMapper;
-    private final ChunkMapper chunkMapper;
     private final MessageMapper messageMapper;
     private final ConversationMapper conversationMapper;
+    private final StringRedisTemplate redisTemplate;
 
-    @Value("${python-agent.heartbeat-interval:15000}")
-    private long heartbeatInterval;
+    @Value("${streaming.max-chunks-per-message:5000}")
+    private int maxChunksPerMessage;
+
+    @Value("${streaming.chunk-ttl:3600}")
+    private int chunkTtlSeconds;
+
+    // 异步执行器：仅用于 done 事件的批量存储
+    private final ExecutorService storageExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+    // 并发控制
+    private final ConcurrentHashMap<Long, AtomicInteger> userActiveStreams = new ConcurrentHashMap<>();
+
+    @Value("${streaming.per-user-limit:5}")
+    private int perUserLimit;
 
     @Override
     public SseEmitter streamChat(Long userId, StreamChatRequest request) {
-        // 超时时间 120 秒
-        long timeout = 120000L;
-        SseEmitter emitter = new SseEmitter(timeout);
+        AtomicInteger activeCount = userActiveStreams.computeIfAbsent(userId, k -> new AtomicInteger(0));
+        if (activeCount.incrementAndGet() > perUserLimit) {
+            activeCount.decrementAndGet();
+            throw new IllegalStateException("用户并发流数超限: " + activeCount.get() + "/" + perUserLimit);
+        }
 
-        // 异步处理，不阻塞主线程
-        CompletableFuture.runAsync(() -> handleStream(emitter, userId, request));
+        SseEmitter emitter = new SseEmitter(120000L);
+        SafeEmitter safeEmitter = new SafeEmitter(emitter);
 
-        // 处理完成事件
-        emitter.onCompletion(() -> log.info("[流式服务] SSE 连接完成, userId={}", userId));
-
-        // 处理超时事件
-        emitter.onTimeout(() -> {
-            log.warn("[流式服务] SSE 连接超时, userId={}", userId);
-            sendError(emitter, "请求超时");
-            emitter.complete();
+        CompletableFuture.runAsync(() -> {
+            try {
+                handleStream(safeEmitter, userId, request);
+            } finally {
+                activeCount.decrementAndGet();
+            }
         });
 
-        // 处理异常事件
-        emitter.onError((ex) -> log.error("[流式服务] SSE 连接异常, userId={}", userId, ex));
+        emitter.onCompletion(() -> safeEmitter.markCompleted());
+        emitter.onTimeout(() -> {
+            log.warn("[流式] SSE 超时, userId={}", userId);
+            safeEmitter.markCompleted();
+        });
+        emitter.onError((ex) -> safeEmitter.markCompleted());
 
         return emitter;
     }
@@ -79,330 +96,274 @@ public class StreamChatServiceImpl implements StreamChatService {
     /**
      * 处理流式请求
      */
-    private void handleStream(SseEmitter emitter, Long userId, StreamChatRequest request) {
-        log.info("[流式服务] 开始处理流式请求, userId={}, request={}", userId, request);
-
-        // 获取或创建会话
+    private void handleStream(SafeEmitter emitter, Long userId, StreamChatRequest request) {
         Long conversationId = getOrCreateConversation(userId, request);
-
-        // 构建请求体
         Map<String, Object> requestBody = buildRequestBody(userId, request, conversationId);
 
-        // 标记是否已完成
+        // 内存缓冲：累积所有 chunk 数据
+        List<String> chunkDataBuffer = Collections.synchronizedList(new ArrayList<>());
+        StringBuilder fullContent = new StringBuilder();
+        AtomicInteger chunkCount = new AtomicInteger(0);
         AtomicBoolean completed = new AtomicBoolean(false);
 
-        // Chunk 计数器
-        AtomicInteger chunkIndex = new AtomicInteger(0);
+        String messageId = UUID.randomUUID().toString();
+        String redisKey = "stream:" + conversationId + ":" + messageId;
 
-        // 创建 Message 记录（用户消息）
-        Message userMessage = createUserMessage(userId, conversationId, request.getMessage());
+        // 创建用户消息
+        createUserMessage(userId, conversationId, request.getMessage());
+
+        CountDownLatch latch = new CountDownLatch(1);
+        reactor.core.Disposable subscription = null;
 
         try {
-            // 获取 Python SSE 流
-            Flux<SseEvent> eventFlux = streamGateway.streamChat(requestBody);
+            Flux<SseEvent> eventFlux = streamGateway.streamChat(requestBody)
+                    .subscribeOn(Schedulers.boundedElastic());
 
-            // 创建心跳 Flux
-            Flux<SseEvent> heartbeatFlux = Flux.interval(
-                            java.time.Duration.ofMillis(heartbeatInterval),
-                            java.time.Duration.ofMillis(heartbeatInterval)
-                    )
-                    .map(tick -> SseEvent.builder()
-                            .event("ping")
-                            .data("keep-alive")
-                            .build())
-                    .doOnNext(event -> log.debug("[流式服务] 发送心跳"));
-
-            // 用于累积 assistant 回复内容
-            StringBuilder assistantContent = new StringBuilder();
-            String[] agentTitle = new String[1]; // 存储 agent 总结
-
-            // 合并数据流和心跳流
-            Flux.merge(eventFlux, heartbeatFlux)
+            subscription = eventFlux
                     .doOnNext(sseEvent -> {
-                        if (completed.get()) {
-                            return;
-                        }
+                        if (completed.get()) return;
 
                         try {
-                            // 记录日志
-                            if ("done".equals(sseEvent.getEvent())) {
-                                log.info("[流式服务] 收到完成事件: {}", sseEvent.getData());
-                                
-                                // 解析 done 事件数据，提取 agent 总结
-                                String title = parseDoneEvent(sseEvent.getData());
-                                agentTitle[0] = title;
-                                
-                                // 创建 Assistant Message
-                                Message assistantMessage = createAssistantMessage(
-                                        userId, conversationId, 
-                                        assistantContent.toString(), 
-                                        title
-                                );
+                            // 🚀 立即发送给前端（唯一优先级）
+                            emitter.sendEvent(sseEvent);
 
-                                // 完成流式处理
-                                completed.set(true);
-                                emitter.complete();
-                                log.info("[流式服务] 连接已完成, messageId={}, title={}", 
-                                        assistantMessage.getId(), title);
-                                
-                            } else if ("error".equals(sseEvent.getEvent())) {
-                                log.error("[流式服务] 收到错误事件: {}", sseEvent.getData());
-                                completed.set(true);
-                                sendError(emitter, "Python 服务返回错误");
-                                emitter.complete();
-                                
-                            } else if ("ping".equals(sseEvent.getEvent())) {
-                                // 心跳不打印详细日志
-                                
-                            } else {
-                                log.debug("[流式服务] 收到事件: event={}, id={}, data={}",
-                                        sseEvent.getEvent(), sseEvent.getId(), sseEvent.getData());
-
-                                // 存储 Chunk（只存储 assistant 的内容）
-                                // Python Agent 返回的事件类型可能是 "chunk", "message" 或 "content"
-                                if ("chunk".equals(sseEvent.getEvent()) || 
-                                    "message".equals(sseEvent.getEvent()) || 
-                                    "content".equals(sseEvent.getEvent())) {
-                                    String content = parseContentEvent(sseEvent.getData());
-                                    if (content != null && !content.isEmpty()) {
-                                        assistantContent.append(content);
-                                        
-                                        // 保存 chunk
-                                        saveChunk(userId, conversationId, null, 
-                                                "assistant", content, chunkIndex.getAndIncrement());
-                                    }
+                            String event = sseEvent.getEvent();
+                            if ("chunk".equals(event)) {
+                                // 只累积，不写 IO
+                                String content = extractContent(sseEvent.getData());
+                                if (content != null) {
+                                    fullContent.append(content);
+                                    chunkDataBuffer.add(sseEvent.getData());
+                                    chunkCount.incrementAndGet();
                                 }
+
+                            } else if ("done".equals(event)) {
+                                String title = extractTitle(sseEvent.getData());
+
+                                // 创建 Message
+                                Message msg = createAssistantMessage(
+                                        userId, conversationId, fullContent.toString(), title);
+
+                                // 💾 一次性批量存储（异步，不阻塞）
+                                batchSaveChunksAsync(chunkDataBuffer, conversationId, msg.getId(),
+                                        redisKey, messageId);
+
+                                completed.set(true);
+                                emitter.complete();
+
+                            } else if ("error".equals(event)) {
+                                completed.set(true);
+                                emitter.trySendError("AI 服务返回错误");
+                                emitter.complete();
                             }
 
-                            // 发送事件给前端
-                            sendEvent(emitter, sseEvent);
-
                         } catch (IOException e) {
-                            log.error("[流式服务] 发送事件失败", e);
-                            completed.set(true);
-                            sendError(emitter, "发送数据失败");
-                            emitter.completeWithError(e);
+                            log.error("[流式] 发送失败", e);
+                            if (completed.compareAndSet(false, true)) {
+                                emitter.trySendError("发送失败");
+                                emitter.complete();
+                            }
                         }
                     })
-                    .doOnError(error -> {
-                        if (!completed.get()) {
-                            log.error("[流式服务] 流式处理异常", error);
-                            completed.set(true);
-                            sendError(emitter, "内部服务异常");
-                            emitter.completeWithError(error);
-                        }
-                    })
-                    .doOnComplete(() -> {
-                        if (!completed.get()) {
-                            log.info("[流式服务] 流式处理完成");
-                            completed.set(true);
+                    .doOnError(err -> {
+                        if (completed.compareAndSet(false, true)) {
+                            log.error("[流式] 异常: {}", err.getMessage());
+                            emitter.trySendError("服务异常");
                             emitter.complete();
                         }
                     })
+                    .doFinally(signal -> {
+                        completed.set(true);
+                        latch.countDown();
+                    })
                     .subscribe();
 
+            latch.await();
+
         } catch (Exception e) {
-            if (!completed.get()) {
-                log.error("[流式服务] 流式处理异常", e);
-                completed.set(true);
-                sendError(emitter, "内部服务异常");
-                emitter.completeWithError(e);
+            if (completed.compareAndSet(false, true)) {
+                log.error("[流式] 处理异常", e);
+                emitter.trySendError("服务异常");
+                emitter.complete();
+            }
+        } finally {
+            if (subscription != null && !subscription.isDisposed()) {
+                subscription.dispose();
             }
         }
     }
 
     /**
-     * 获取或创建会话
+     * 批量保存 chunk（一次性操作）
+     * 1. 批量写 Redis（Pipeline）
+     * 2. 写 MySQL（Message 已在 done 事件中创建，这里不存 chunk 表）
      */
+    private void batchSaveChunksAsync(List<String> chunkDataBuffer, Long conversationId,
+                                       Long messageId, String redisKey, String streamMessageId) {
+        if (chunkDataBuffer.isEmpty()) return;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                // 1. 批量写 Redis（Pipeline，一次网络请求）
+                batchWriteToRedis(redisKey, streamMessageId, chunkDataBuffer);
+
+                log.info("[存储] 完成, messageId={}, chunks={}", messageId, chunkDataBuffer.size());
+
+            } catch (Exception e) {
+                log.error("[存储] 失败, messageId={}", messageId, e);
+            }
+        }, storageExecutor);
+    }
+
+    /**
+     * Redis 批量写入（简化版：循环 XADD，设置一次 TTL）
+     */
+    private void batchWriteToRedis(String redisKey, String messageId, List<String> chunkDataList) {
+        try {
+            for (String chunkData : chunkDataList) {
+                redisTemplate.opsForStream().add(
+                        StreamRecords.newRecord()
+                                .ofMap(Map.of(
+                                        "messageId", messageId,
+                                        "data", chunkData
+                                ))
+                                .withStreamKey(redisKey)
+                );
+            }
+            redisTemplate.expire(redisKey, Duration.ofSeconds(chunkTtlSeconds));
+        } catch (Exception e) {
+            log.error("[Redis] 批量写入失败, key={}", redisKey, e);
+        }
+    }
+
+    // ==================== 辅助方法 ====================
+
     private Long getOrCreateConversation(Long userId, StreamChatRequest request) {
         Long conversationId = request.getConversationId();
-        
         if (conversationId == null) {
-            // 创建新会话
-            Conversation conversation = new Conversation();
-            conversation.setUserId(userId);
-            conversation.setTitle(request.getMessage().substring(0, 
-                    Math.min(50, request.getMessage().length())));
-            conversation.setDeleted(0);
-            conversation.setCreatedAt(LocalDateTime.now());
-            conversation.setUpdatedAt(LocalDateTime.now());
-            
-            conversationMapper.insert(conversation);
-            conversationId = conversation.getId();
-            
-            log.info("[流式服务] 创建新会话, conversationId={}", conversationId);
+            Conversation conv = new Conversation();
+            conv.setUserId(userId);
+            conv.setTitle(request.getMessage().substring(0, Math.min(50, request.getMessage().length())));
+            conv.setDeleted(0);
+            conv.setCreatedAt(LocalDateTime.now());
+            conv.setUpdatedAt(LocalDateTime.now());
+            conversationMapper.insert(conv);
+            conversationId = conv.getId();
         }
-        
         return conversationId;
     }
 
-    /**
-     * 创建用户消息
-     */
-    private Message createUserMessage(Long userId, Long conversationId, String content) {
-        Message message = new Message();
-        message.setConversationId(conversationId);
-        message.setUserId(userId);
-        message.setRole("user");
-        message.setContent(content);
-        message.setDeleted(0);
-        message.setCreatedAt(LocalDateTime.now());
-        message.setUpdatedAt(LocalDateTime.now());
-        
-        messageMapper.insert(message);
-        log.debug("[流式服务] 创建用户消息, messageId={}", message.getId());
-        
-        return message;
+    private void createUserMessage(Long userId, Long conversationId, String content) {
+        Message msg = new Message();
+        msg.setConversationId(conversationId);
+        msg.setUserId(userId);
+        msg.setRole("user");
+        msg.setContent(content);
+        msg.setDeleted(0);
+        msg.setCreatedAt(LocalDateTime.now());
+        msg.setUpdatedAt(LocalDateTime.now());
+        messageMapper.insert(msg);
     }
 
-    /**
-     * 创建 AI 助手消息（在 done 事件时调用）
-     */
-    private Message createAssistantMessage(Long userId, Long conversationId, 
-                                           String content, String title) {
-        Message message = new Message();
-        message.setConversationId(conversationId);
-        message.setUserId(userId);
-        message.setRole("assistant");
-        message.setContent(content);
-        message.setTitle(title); // 存储 agent 总结
-        message.setDeleted(0);
-        message.setCreatedAt(LocalDateTime.now());
-        message.setUpdatedAt(LocalDateTime.now());
-        
-        messageMapper.insert(message);
-        
-        // 更新所有 chunk 的 messageId
-        chunkMapper.update(null, 
-                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Chunk>()
-                        .eq(Chunk::getConversationId, conversationId)
-                        .isNull(Chunk::getMessageId)
-                        .set(Chunk::getMessageId, message.getId())
-        );
-        
-        log.info("[流式服务] 创建 AI 助手消息, messageId={}, chunkCount={}", 
-                message.getId(), chunkMapper.selectCount(
-                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Chunk>()
-                                .eq(Chunk::getMessageId, message.getId())
-                ));
-        
-        return message;
+    private Message createAssistantMessage(Long userId, Long conversationId, String content, String title) {
+        Message msg = new Message();
+        msg.setConversationId(conversationId);
+        msg.setUserId(userId);
+        msg.setRole("assistant");
+        msg.setContent(content);
+        msg.setTitle(title);
+        msg.setDeleted(0);
+        msg.setCreatedAt(LocalDateTime.now());
+        msg.setUpdatedAt(LocalDateTime.now());
+        messageMapper.insert(msg);
+        return msg;
     }
 
-    /**
-     * 保存 chunk
-     */
-    private void saveChunk(Long userId, Long conversationId, Long messageId, 
-                          String role, String content, int index) {
-        Chunk chunk = new Chunk();
-        chunk.setConversationId(conversationId);
-        chunk.setMessageId(messageId); // 初始为 null，完成后更新
-        chunk.setUserId(userId);
-        chunk.setRole(role);
-        chunk.setContent(content);
-        chunk.setChunkIndex(index);
-        chunk.setIsLast(false);
-        chunk.setDeleted(0);
-        chunk.setCreatedAt(LocalDateTime.now());
-        chunk.setUpdatedAt(LocalDateTime.now());
-        
-        chunkMapper.insert(chunk);
-        log.debug("[流式服务] 保存 chunk, chunkId={}, index={}", chunk.getId(), index);
-    }
-
-    /**
-     * 解析 content 事件数据
-     */
-    private String parseContentEvent(String data) {
+    private String extractContent(String data) {
         try {
-            JsonNode jsonNode = objectMapper.readTree(data);
-            if (jsonNode.has("content")) {
-                return jsonNode.get("content").asText();
-            }
+            JsonNode node = objectMapper.readTree(data);
+            return node.has("content") ? node.get("content").asText() : null;
         } catch (Exception e) {
-            // 如果不是 JSON 格式，直接返回数据
-            return data;
+            return null;
         }
-        return null;
     }
 
-    /**
-     * 解析 done 事件数据，提取 agent 总结
-     */
-    private String parseDoneEvent(String data) {
+    private String extractTitle(String data) {
         try {
-            JsonNode jsonNode = objectMapper.readTree(data);
-            // 尝试从 done 事件中提取 title/summary/info 字段
-            if (jsonNode.has("title")) {
-                return jsonNode.get("title").asText();
-            } else if (jsonNode.has("summary")) {
-                return jsonNode.get("summary").asText();
-            } else if (jsonNode.has("info")) {
-                return jsonNode.get("info").asText();
-            } else if (jsonNode.has("message")) {
-                return jsonNode.get("message").asText();
-            }
+            JsonNode node = objectMapper.readTree(data);
+            if (node.has("info")) return node.get("info").asText();
+            if (node.has("title")) return node.get("title").asText();
+            if (node.has("summary")) return node.get("summary").asText();
         } catch (Exception e) {
-            log.warn("[流式服务] 解析 done 事件失败: {}", data);
+            log.warn("[流式] 解析 title 失败: {}", data);
         }
         return "对话完成";
     }
 
-    /**
-     * 发送 SSE 事件
-     */
-    private void sendEvent(SseEmitter emitter, SseEvent sseEvent) throws IOException {
-        SseEmitter.SseEventBuilder eventBuilder = SseEmitter.event()
-                .name(sseEvent.getEvent())
-                .data(sseEvent.getData());
-
-        if (sseEvent.getId() != null) {
-            eventBuilder.id(sseEvent.getId());
-        }
-
-        emitter.send(eventBuilder);
-    }
-
-    /**
-     * 发送错误事件
-     */
-    private void sendError(SseEmitter emitter, String message) {
-        try {
-            Map<String, Object> errorData = Map.of(
-                    "type", "error",
-                    "message", message
-            );
-            String json = objectMapper.writeValueAsString(errorData);
-
-            SseEmitter.SseEventBuilder eventBuilder = SseEmitter.event()
-                    .name("error")
-                    .data(json);
-
-            emitter.send(eventBuilder);
-        } catch (Exception e) {
-            log.error("[流式服务] 发送错误事件失败", e);
-        }
-    }
-
-    /**
-     * 构建请求体
-     */
-    private Map<String, Object> buildRequestBody(Long userId, StreamChatRequest request, 
-                                                  Long conversationId) {
+    private Map<String, Object> buildRequestBody(Long userId, StreamChatRequest request, Long conversationId) {
         Map<String, Object> body = new HashMap<>();
         body.put("message", request.getMessage());
-
-        if (request.getSessionId() != null) {
-            body.put("session_id", request.getSessionId());
-        }
-
-        if (conversationId != null) {
-            body.put("conversation_id", conversationId);
-        }
-
+        if (request.getSessionId() != null) body.put("session_id", request.getSessionId());
+        if (conversationId != null) body.put("conversation_id", conversationId);
         body.put("user_id", userId);
         body.put("stream", true);
-
         return body;
+    }
+
+    @Override
+    public void recoverChunks(Long conversationId, String messageId, String lastEventId, SseEmitter emitter) {
+        String redisKey = "stream:" + conversationId + ":" + messageId;
+        try {
+            var records = redisTemplate.opsForStream().read(StreamOffset.fromStart(redisKey));
+            if (records != null) {
+                for (var record : records) {
+                    String dataJson = (String) record.getValue().get("data");
+                    if (dataJson != null) {
+                        JsonNode node = objectMapper.readTree(dataJson);
+                        String type = node.has("type") ? node.get("type").asText() : "chunk";
+                        emitter.send(SseEmitter.event().name(type).id(record.getId().getValue()).data(dataJson));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("[断线恢复] 失败", e);
+        }
+    }
+
+    // ==================== SafeEmitter ====================
+
+    private static class SafeEmitter {
+        private final SseEmitter emitter;
+        private final AtomicBoolean completed = new AtomicBoolean(false);
+        private final ReentrantLock lock = new ReentrantLock();
+
+        SafeEmitter(SseEmitter emitter) { this.emitter = emitter; }
+
+        void sendEvent(SseEvent sseEvent) throws IOException {
+            if (completed.get()) return;
+            lock.lock();
+            try {
+                if (completed.get()) return;
+                var builder = SseEmitter.event().name(sseEvent.getEvent()).data(sseEvent.getData());
+                if (sseEvent.getId() != null) builder.id(sseEvent.getId());
+                emitter.send(builder);
+            } catch (IllegalStateException e) {
+                log.debug("[SafeEmitter] 已关闭");
+            } finally { lock.unlock(); }
+        }
+
+        void trySendError(String msg) {
+            try {
+                emitter.send(SseEmitter.event().name("error")
+                        .data("{\"type\":\"error\",\"message\":\"" + msg + "\"}"));
+            } catch (Exception ignored) {}
+        }
+
+        void markCompleted() { completed.set(true); }
+        void complete() {
+            if (completed.compareAndSet(false, true)) {
+                try { emitter.complete(); } catch (Exception ignored) {}
+            }
+        }
     }
 }

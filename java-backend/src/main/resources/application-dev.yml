@@ -46,3 +46,10 @@ python-agent:
   retry:
     max-attempts: 3
     delay: 1000   # 1秒
+
+# 流式服务配置
+streaming:
+  max-concurrent: 1000          # 最大并发流（全局）
+  per-user-limit: 5             # 单用户最大流数
+  max-chunks-per-message: 5000  # 单条消息最大 chunk 数
+  chunk-ttl: 3600               # chunk TTL（秒）

@@ -2,12 +2,15 @@ package com.caius.agent.common.exception;
 
 import com.caius.agent.common.result.Result;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理
@@ -53,5 +56,15 @@ public class GlobalExceptionHandler {
     public Result<?> handleException(Exception e) {
         log.error("系统异常", e);
         return Result.error("系统异常，请稍后重试");
+    }
+
+    /**
+     * 404 资源未找到（不打印堆栈，避免前端路由误判为后端接口时刷屏）
+     */
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(NoResourceFoundException.class)
+    public Result<?> handleNoResourceFound(NoResourceFoundException e) {
+        log.warn("资源未找到: {}", e.getMessage());
+        return Result.error(404, "接口不存在");
     }
 }

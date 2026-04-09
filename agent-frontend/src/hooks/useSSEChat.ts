@@ -1,15 +1,18 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { createSSEConnection, SSEHandlers, SEDoneData, SEEErrorData } from '../services/sse';
 import { getConversationMessages, Message as ConversationMessage } from '../services/conversation';
 
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string; // 思考过程内容
 }
 
 interface UseSSEChatReturn {
   messages: Message[];
   currentStreamingMessage: string;
+  currentStreamingReasoning: string;
   isLoading: boolean;
   error: string | null;
   conversationId: number | null; // 当前会话 ID
@@ -27,12 +30,14 @@ interface UseSSEChatReturn {
 export function useSSEChat(): UseSSEChatReturn {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState('');
+  const [currentStreamingReasoning, setCurrentStreamingReasoning] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingBufferRef = useRef('');
+  const streamingReasoningBufferRef = useRef('');
 
   // 关闭当前 SSE 连接（通过 AbortController）
   const closeConnection = useCallback(() => {
@@ -70,7 +75,19 @@ export function useSSEChat(): UseSSEChatReturn {
       onChunk: (content: string, _index: number) => {
         // 累加 chunk 内容
         streamingBufferRef.current += content;
-        setCurrentStreamingMessage(streamingBufferRef.current);
+        // 使用 flushSync 确保立即渲染，打破 React 批处理
+        flushSync(() => {
+          setCurrentStreamingMessage(streamingBufferRef.current);
+        });
+      },
+
+      onReasoning: (reasoning: string, _index: number) => {
+        // 累加思考过程
+        streamingReasoningBufferRef.current += reasoning;
+        // 使用 flushSync 确保立即渲染
+        flushSync(() => {
+          setCurrentStreamingReasoning(streamingReasoningBufferRef.current);
+        });
       },
 
       onConversationId: (newConversationId: number) => {
@@ -83,17 +100,20 @@ export function useSSEChat(): UseSSEChatReturn {
         console.debug('[SSE] Stream completed, total_tokens:', data.total_tokens);
 
         // 将流式消息添加到消息列表
-        if (streamingBufferRef.current) {
+        if (streamingBufferRef.current || streamingReasoningBufferRef.current) {
           const assistantMessage: Message = {
             role: 'assistant',
             content: streamingBufferRef.current,
+            reasoning: streamingReasoningBufferRef.current || undefined,
           };
           setMessages((prev) => [...prev, assistantMessage]);
         }
 
         // 清理状态
         setCurrentStreamingMessage('');
+        setCurrentStreamingReasoning('');
         streamingBufferRef.current = '';
+        streamingReasoningBufferRef.current = '';
         setIsLoading(false);
         abortControllerRef.current = null;
       },
@@ -131,16 +151,19 @@ export function useSSEChat(): UseSSEChatReturn {
   // 中止当前的流式输出
   const abortStream = useCallback(() => {
     // 将当前已接收的内容添加到消息列表
-    if (streamingBufferRef.current) {
+    if (streamingBufferRef.current || streamingReasoningBufferRef.current) {
       const assistantMessage: Message = {
         role: 'assistant',
         content: streamingBufferRef.current,
+        reasoning: streamingReasoningBufferRef.current || undefined,
       };
       setMessages((prev) => [...prev, assistantMessage]);
     }
 
     setCurrentStreamingMessage('');
+    setCurrentStreamingReasoning('');
     streamingBufferRef.current = '';
+    streamingReasoningBufferRef.current = '';
     setIsLoading(false);
     setError(null);
     closeConnection();
@@ -150,7 +173,9 @@ export function useSSEChat(): UseSSEChatReturn {
   const clearMessages = useCallback(() => {
     setMessages([]);
     setCurrentStreamingMessage('');
+    setCurrentStreamingReasoning('');
     streamingBufferRef.current = '';
+    streamingReasoningBufferRef.current = '';
     setError(null);
     setIsLoading(false);
     closeConnection();
@@ -185,6 +210,7 @@ export function useSSEChat(): UseSSEChatReturn {
   return {
     messages,
     currentStreamingMessage,
+    currentStreamingReasoning,
     isLoading,
     error,
     conversationId,

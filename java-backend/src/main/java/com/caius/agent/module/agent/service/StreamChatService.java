@@ -16,4 +16,14 @@ public interface StreamChatService {
      * @return SSE 发射器
      */
     SseEmitter streamChat(Long userId, StreamChatRequest request);
+
+    /**
+     * 断线恢复：从 Redis 读取并 replay chunk
+     *
+     * @param conversationId 会话 ID
+     * @param messageId      消息 ID（UUID）
+     * @param lastEventId    最后接收到的事件 ID（可选）
+     * @param emitter        SSE 发射器
+     */
+    void recoverChunks(Long conversationId, String messageId, String lastEventId, SseEmitter emitter);
 }

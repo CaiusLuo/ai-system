@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect as useEffectHook } from 'react';
+import { useRef, useState, useEffect as useEffectHook, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSSEChat, Message } from '../hooks/useSSEChat';
 import Sidebar from '../components/Sidebar';
@@ -11,6 +11,7 @@ export default function ChatPage() {
   const {
     messages,
     currentStreamingMessage,
+    currentStreamingReasoning,
     isLoading,
     error,
     conversationId,
@@ -52,27 +53,57 @@ export default function ChatPage() {
     loadConversations();
   }, []);
 
-  // 自动滚动到底部
+  // 自动滚动到底部 - 使用 instant 避免平滑滚动动画重叠
   useEffectHook(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages, currentStreamingMessage]);
 
   const handleSend = (message: string) => {
+    // 防止在流式输出过程中发送新消息
+    if (isLoading) {
+      console.warn('[Chat] Cannot send message while streaming');
+      return;
+    }
     // 使用 hook 中的 conversationId，实现会话连续性
     sendMessage(message, conversationId || undefined);
   };
 
   const handleNewConversation = () => {
+    // 防止在流式输出过程中创建新对话
+    if (isLoading) {
+      console.warn('[Chat] Cannot create new conversation while streaming');
+      return;
+    }
     clearMessages();
     setIsMobileSidebarOpen(false);
   };
 
+  // 清空对话按钮操作（需要保护）
+  const handleClearMessages = () => {
+    // 防止在流式输出过程中清空对话
+    if (isLoading) {
+      console.warn('[Chat] Cannot clear messages while streaming');
+      return;
+    }
+    clearMessages();
+  };
+
   const handleSelectConversation = async (id: number) => {
+    // 防止在流式输出过程中加载其他对话
+    if (isLoading) {
+      console.warn('[Chat] Cannot load conversation while streaming');
+      return;
+    }
     await loadConversation(id);
     setIsMobileSidebarOpen(false);
   };
 
   const handleDeleteConversation = async (id: number) => {
+    // 防止在流式输出过程中删除对话
+    if (isLoading) {
+      console.warn('[Chat] Cannot delete conversation while streaming');
+      return;
+    }
     try {
       await deleteConversation(id);
       // 如果删除的是当前会话，清空消息
@@ -94,19 +125,24 @@ export default function ChatPage() {
   const showAdminEntry = userRole === 'ADMIN';
 
   // 构建完整的消息列表（包含正在流式输出的消息）
-  const displayMessages: Message[] = [
+  // 使用 useMemo 避免每次渲染都创建新数组
+  const displayMessages = useMemo<Message[]>(() => [
     ...messages,
-    ...(currentStreamingMessage
-      ? [{ role: 'assistant' as const, content: currentStreamingMessage }]
+    ...(currentStreamingMessage || currentStreamingReasoning
+      ? [{
+          role: 'assistant' as const,
+          content: currentStreamingMessage,
+          reasoning: currentStreamingReasoning || undefined,
+        }]
       : []),
-  ];
+  ], [messages, currentStreamingMessage, currentStreamingReasoning]);
 
-  // 监听消息变化，刷新会话列表
+  // ⚠️ 修复：只在消息完成时刷新会话列表，而不是每个 chunk 都请求
   useEffectHook(() => {
-    if (messages.length > 0 || currentStreamingMessage) {
+    if (messages.length > 0 && !isLoading) {
       loadConversations();
     }
-  }, [messages.length, currentStreamingMessage]);
+  }, [messages.length]); // 只在消息数量变化时触发，而不是 currentStreamingMessage
 
   return (
     <div className="h-full flex bg-white dark:bg-gray-900">
@@ -153,7 +189,7 @@ export default function ChatPage() {
           {/* 清空对话按钮 */}
           {messages.length > 0 && (
             <button
-              onClick={clearMessages}
+              onClick={handleClearMessages}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 dark:text-gray-400"
               title="清空对话"
             >

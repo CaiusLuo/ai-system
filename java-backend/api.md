@@ -1,354 +1,142 @@
-# Agent 后端系统 API 文档
+# API 接口文档
 
-**基础地址：** `http://localhost:8080`
+> 前端项目：agent-frontend  
+> 后端端口：8080  
+> 代理前缀：`/agent`（通过 Vite 代理转发到 `http://localhost:8080`）
 
-**统一返回格式：**
+---
+
+## 1. 聊天接口（SSE 流式）
+
+### 1.1 发送消息并接收流式响应
+
+**端点:** `POST /agent/chat/stream`
+
+**认证:** 需要 `Authorization: Bearer <token>`
+
+**请求头:**
+```
+Content-Type: application/json
+Authorization: Bearer <token>
+```
+
+**请求体:**
+```json
+{
+  "message": "用户消息内容",
+  "conversationId": 123,
+  "sessionId": "optional-session-id"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| message | string | 是 | 用户消息内容 |
+| conversationId | number | 否 | 会话 ID，首次请求不需要 |
+| sessionId | string | 否 | 会话标识（Python Agent 使用） |
+
+**响应:** Server-Sent Events (SSE) 流  
+**Content-Type:** `text/event-stream`
+
+---
+
+### SSE 事件格式
+
+所有 SSE 事件的 `data` 字段均为 **JSON 字符串**，前端需要 `JSON.parse()` 解析。
+
+#### 标准化数据结构
+
+后端已将 Python 返回的数据标准化为以下统一格式，前端可按此格式解析：
+
+```typescript
+// SSE 事件类型定义
+export interface SSEChunkData {
+  type: 'chunk' | 'done' | 'error' | 'ping';
+  content: string;           // chunk 内容
+  index: number;             // chunk 序号（从 0 开始）
+  reasoning?: string;        // 思考过程内容（思考模式）
+  info?: string;             // 额外信息（done 事件时的总结信息）
+  conversationId?: number;   // 首次响应可能包含 conversationId
+}
+```
+
+#### 事件类型详解
+
+| 事件类型 | `data` 字段结构 | 说明 | 前端处理 |
+|---------|----------------|------|---------|
+| `chunk` | `{ "type": "chunk", "content": "内容", "index": 0, "reasoning": "思考过程"?, "conversationId": 123? }` | AI 回复的内容片段 | 打字机输出 `content`，若有 `reasoning` 显示思考过程 |
+| `done`  | `{ "type": "done", "info": "总结信息", "conversationId": 123? }` | 流式传输完成 | 结束打字机，显示总结信息（若有） |
+| `error` | `{ "type": "error", "message": "错误信息" }` | 发生错误 | 显示错误提示 |
+| `ping`  | `{ "type": "ping" }` | 心跳检测（每 15 秒） | 可忽略，或用于检测连接状态 |
+
+#### 完整 SSE 原始格式示例
+
+```
+event: chunk
+id: chunk-0
+data: {"type":"chunk","content":"你","index":0}
+
+event: chunk
+id: chunk-1
+data: {"type":"chunk","content":"好","index":1}
+
+event: chunk
+id: chunk-2
+data: {"type":"chunk","content":"！","index":2,"reasoning":"用户打招呼"}
+
+event: done
+id: done-3
+data: {"type":"done","info":"对话完成","conversationId":123}
+```
+
+---
+
+### 1.2 断线恢复
+
+**端点:** `GET /agent/chat/stream/recover`
+
+**说明:** 前端 SSE 断开后，从此接口重新获取未接收的 chunk。
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| conversationId | number | 是 | 会话 ID |
+| messageId | string | 是 | 消息 UUID（首次请求时后端返回） |
+| lastEventId | string | 否 | 最后接收到的事件 ID（如 `chunk-5`） |
+
+**响应:** SSE 流，格式同 `1.1`
+
+**使用方式:**
+```
+GET /agent/chat/stream/recover?conversationId=123&messageId=xxx&lastEventId=chunk-5
+```
+
+---
+
+## 2. 用户管理接口（Admin API）
+
+> 注意：以下接口目前在前端使用 Mock 数据，后端需实现以下端点
+
+### 2.1 获取用户列表
+
+**端点:** `GET /api/admin/users`
+
+**请求参数:**
+
+| 参数 | 类型 | 必填 | 说明 |
+|-----|------|-----|------|
+| page | number | 是 | 页码（从 1 开始） |
+| pageSize | number | 是 | 每页数量 |
+| keyword | string | 否 | 搜索关键词（匹配用户名或邮箱） |
+| role | string | 否 | 角色筛选：`ADMIN` 或 `USER` |
+| status | string | 否 | 状态筛选：`ACTIVE` 或 `DISABLED` |
+
+**响应:**
 ```json
 {
   "code": 200,
-  "message": "操作成功",
-  "data": {}
-}
-```
-
----
-
-## 目录
-
-- [1. 认证模块（/auth）](#1-认证模块auth)
-- [2. 用户模块（/user）](#2-用户模块user)
-- [3. Agent 对话模块（/agent）](#3-agent-对话模块agent)
-- [4. 会话模块（/conversation）](#4-会话模块conversation)
-- [5. 管理模块（/api/admin）](#5-管理模块apiadmin)
-- [完整测试流程](#完整测试流程)
-- [错误处理](#错误处理)
-
----
-
-## 1. 认证模块（/auth）
-
-### 1.1 用户注册
-
-**POST** `/auth/register`
-
-**请求体：**
-```json
-{
-  "username": "testuser",
-  "email": "test@example.com",
-  "password": "123456"
-}
-```
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "注册成功",
-  "data": null
-}
-```
-
-**错误响应：**
-- `400` - 参数校验失败（用户名/邮箱为空、密码过短等）
-- `409` - 用户名或邮箱已存在
-
----
-
-### 1.2 用户登录
-
-**POST** `/auth/login`
-
-**请求体：**
-```json
-{
-  "username": "testuser",
-  "password": "123456"
-}
-```
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "登录成功",
-  "data": {
-    "token": "eyJhbGciOiJIUzI1NiJ9...",
-    "userId": 1,
-    "username": "admin",
-    "role": "ADMIN"
-  }
-}
-```
-
-**错误响应：**
-- `400` - 用户名或密码为空
-- `500` - 用户名不存在或密码错误
-
-> 💡 **Token 使用说明**  
-> 登录成功后，将返回的 `token` 值用于后续请求的 `Authorization` 头：  
-> `Authorization: Bearer $TOKEN`
-
----
-
-## 2. 用户模块（/user）
-
-### 2.1 获取用户信息
-
-**GET** `/user/{id}`
-
-**权限：** 管理员或用户本人
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": {
-    "id": 1,
-    "username": "admin",
-    "email": "admin@example.com",
-    "role": "ADMIN",
-    "status": 1
-  }
-}
-```
-
-**错误响应：**
-- `401` - 未认证
-- `403` - 权限不足
-- `404` - 用户不存在
-
----
-
-### 2.2 更新用户信息
-
-**PUT** `/user/{id}`
-
-**权限：** 管理员或用户本人
-
-**请求体：**
-```json
-{
-  "email": "newemail@example.com"
-}
-```
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "更新成功",
-  "data": null
-}
-```
-
-**错误响应：**
-- `400` - 参数校验失败
-- `401` - 未认证
-- `403` - 权限不足
-- `404` - 用户不存在
-- `409` - 邮箱已存在
-
----
-
-## 3. Agent 对话模块（/agent）
-
-### 3.1 AI 对话（非流式）
-
-**POST** `/agent/chat`
-
-**权限：** 需要认证
-
-**请求体（创建新会话）：**
-```json
-{
-  "message": "你好，AI助手"
-}
-```
-
-**请求体（继续已有会话）：**
-```json
-{
-  "message": "你能做什么？",
-  "conversationId": 1
-}
-```
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": {
-    "reply": "你好！我是AI助手，有什么可以帮助你的吗？",
-    "conversationId": 1
-  }
-}
-```
-
-**错误响应：**
-- `400` - 消息内容为空
-- `401` - 未认证
-- `500` - AI 服务异常
-
----
-
-### 3.2 AI 对话（流式 - SSE）
-
-**POST** `/agent/chat/stream`
-
-**权限：** 需要认证
-
-**Content-Type：** `application/json`  
-**响应类型：** `text/event-stream`
-
-**请求体：**
-```json
-{
-  "message": "你好，AI助手",
-  "conversationId": 1
-}
-```
-
-**响应示例（SSE 流）：**
-```
-data: {"content": "你好"}
-data: {"content": "！我是"}
-data: {"content": "AI助手"}
-data: {"done": true, "conversationId": 1}
-```
-
-**错误响应：**
-- `400` - 消息内容为空
-- `401` - 未认证
-- `500` - AI 服务异常
-
----
-
-## 4. 会话模块（/conversation）
-
-### 4.1 获取会话列表
-
-**GET** `/conversation/list`
-
-**权限：** 需要认证（返回当前用户的会话）
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": [
-    {
-      "id": 1,
-      "userId": 1,
-      "title": "你好，AI助手",
-      "createdAt": "2026-04-08T23:00:00",
-      "updatedAt": "2026-04-08T23:00:00"
-    }
-  ]
-}
-```
-
----
-
-### 4.2 获取会话消息列表
-
-**GET** `/conversation/{id}/messages`
-
-**权限：** 需要认证
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": [
-    {
-      "id": 1,
-      "conversationId": 1,
-      "userId": 1,
-      "role": "user",
-      "content": "你好，AI助手",
-      "createdAt": "2026-04-08T23:00:00"
-    },
-    {
-      "id": 2,
-      "conversationId": 1,
-      "userId": 1,
-      "role": "assistant",
-      "content": "你好！我是AI助手...",
-      "createdAt": "2026-04-08T23:00:01"
-    }
-  ]
-}
-```
-
-**错误响应：**
-- `404` - 会话不存在
-
----
-
-### 4.3 删除会话
-
-**DELETE** `/conversation/{id}`
-
-**权限：** 需要认证
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "删除成功",
-  "data": null
-}
-```
-
-**错误响应：**
-- `404` - 会话不存在
-
----
-
-## 5. 管理模块（/api/admin）
-
-> 🔐 **认证要求**
-> 所有 `/api/admin/**` 接口需要 JWT 认证，且用户必须具有 `ADMIN` 角色。
-> 
-> 使用方式：在请求头中添加 `Authorization: Bearer <token>`
-
-### 5.1 获取用户列表
-
-**GET** `/api/admin/users`
-
-**权限：** 需要 ADMIN 角色
-
-**查询参数：**
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| page | int | 否 | 1 | 页码 |
-| pageSize | int | 否 | 10 | 每页数量（最大 100） |
-| keyword | string | 否 | - | 搜索关键词（匹配用户名或邮箱） |
-| role | string | 否 | - | 角色筛选（ADMIN/USER） |
-| status | string | 否 | - | 状态筛选（ACTIVE/DISABLED） |
-
-**请求示例：**
-```bash
-# 先登录获取 Token
-TOKEN=$(curl -s -X POST "http://localhost:8080/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' | jq -r '.data.token')
-
-# 使用 Token 访问
-curl -X GET "http://localhost:8080/api/admin/users?page=1&pageSize=10&role=ADMIN" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
+  "message": "success",
   "data": {
     "list": [
       {
@@ -360,68 +148,44 @@ curl -X GET "http://localhost:8080/api/admin/users?page=1&pageSize=10&role=ADMIN
         "createdAt": "2024-01-15T10:30:00Z"
       }
     ],
-    "total": 2,
+    "total": 100,
     "page": 1,
     "pageSize": 10
   }
 }
 ```
 
-**错误响应：**
-- `401` - Token 无效或缺失
-- `403` - 权限不足（非 ADMIN 角色）
-
 ---
 
-### 5.2 创建用户
+### 2.2 创建用户
 
-**POST** `/api/admin/users`
+**端点:** `POST /api/admin/users`
 
-**权限：** 需要 ADMIN 角色
+**请求头:**
+```
+Content-Type: application/json
+```
 
-**请求体：**
+**请求体:**
 ```json
 {
-  "username": "testuser",
-  "email": "test@example.com",
-  "password": "password123",
+  "username": "新用户名",
+  "email": "user@example.com",
+  "password": "密码（至少6位）",
   "role": "USER",
   "status": "ACTIVE"
 }
 ```
 
-**字段校验：**
-| 字段 | 类型 | 必填 | 校验规则 |
-|------|------|------|----------|
-| username | string | ✅ | 3-50 字符 |
-| email | string | ✅ | 邮箱格式 |
-| password | string | ✅ | 至少 6 位 |
-| role | string | ✅ | ADMIN 或 USER |
-| status | string | ✅ | ACTIVE 或 DISABLED |
-
-**请求示例：**
-```bash
-curl -X POST "http://localhost:8080/api/admin/users" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "testuser",
-    "email": "test@example.com",
-    "password": "password123",
-    "role": "USER",
-    "status": "ACTIVE"
-  }'
-```
-
-**响应示例：**
+**响应:**
 ```json
 {
   "code": 200,
-  "message": "操作成功",
+  "message": "success",
   "data": {
-    "id": 3,
-    "username": "testuser",
-    "email": "test@example.com",
+    "id": 13,
+    "username": "新用户名",
+    "email": "user@example.com",
     "role": "USER",
     "status": "ACTIVE",
     "createdAt": "2024-07-20T10:00:00Z"
@@ -429,47 +193,31 @@ curl -X POST "http://localhost:8080/api/admin/users" \
 }
 ```
 
-**错误响应：**
-- `400` - 参数校验失败
-- `401` - Token 无效或缺失
-- `403` - 权限不足（非 ADMIN 角色）
-- `409` - 用户名或邮箱已存在
-
 ---
 
-### 5.3 更新用户
+### 2.3 更新用户
 
-**PUT** `/api/admin/users/{id}`
+**端点:** `PUT /api/admin/users/{id}`
 
-**权限：** 需要 ADMIN 角色
-
-**请求体（部分更新）：**
+**请求体:**
 ```json
 {
-  "username": "updatedadmin",
-  "email": "updated@example.com"
+  "username": "更新后的用户名",
+  "email": "updated@example.com",
+  "password": "新密码（可选，留空则不修改）",
+  "role": "ADMIN",
+  "status": "ACTIVE"
 }
 ```
 
-**请求示例：**
-```bash
-curl -X PUT "http://localhost:8080/api/admin/users/1" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "updatedadmin",
-    "email": "updated@example.com"
-  }'
-```
-
-**响应示例：**
+**响应:**
 ```json
 {
   "code": 200,
-  "message": "操作成功",
+  "message": "success",
   "data": {
     "id": 1,
-    "username": "updatedadmin",
+    "username": "更新后的用户名",
     "email": "updated@example.com",
     "role": "ADMIN",
     "status": "ACTIVE",
@@ -478,265 +226,185 @@ curl -X PUT "http://localhost:8080/api/admin/users/1" \
 }
 ```
 
-**错误响应：**
-- `400` - 参数校验失败
-- `401` - Token 无效或缺失
-- `403` - 权限不足（非 ADMIN 角色）
-- `404` - 用户不存在
-- `409` - 用户名或邮箱已存在
-
 ---
 
-### 5.4 删除用户
+### 2.4 删除用户
 
-**DELETE** `/api/admin/users/{id}`
+**端点:** `DELETE /api/admin/users/{id}`
 
-**权限：** 需要 ADMIN 角色
-
-**说明：** 逻辑删除（设置 `deleted=1`），支持幂等操作。
-
-**请求示例：**
-```bash
-curl -X DELETE "http://localhost:8080/api/admin/users/1" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**响应示例：**
+**响应:**
 ```json
 {
   "code": 200,
-  "message": "操作成功",
+  "message": "success",
   "data": null
 }
 ```
 
-**错误响应：**
-- `401` - Token 无效或缺失
-- `403` - 权限不足（非 ADMIN 角色）
-- `404` - 用户不存在（已被删除或从未创建）
-
 ---
 
-### 5.5 切换用户状态
+### 2.5 切换用户状态
 
-**PATCH** `/api/admin/users/{id}/toggle-status`
+**端点:** `PATCH /api/admin/users/{id}/toggle-status`
 
-**权限：** 需要 ADMIN 角色
+**说明:** 在 `ACTIVE` 和 `DISABLED` 之间切换
 
-**说明：** 在 `ACTIVE` (1) 和 `DISABLED` (0) 之间切换，幂等操作。
-
-**请求示例：**
-```bash
-curl -X PATCH "http://localhost:8080/api/admin/users/1/toggle-status" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**响应示例：**
+**响应:**
 ```json
 {
   "code": 200,
-  "message": "操作成功",
+  "message": "success",
   "data": {
     "id": 1,
-    "username": "admin",
-    "email": "admin@example.com",
-    "role": "ADMIN",
+    "username": "用户名",
+    "email": "user@example.com",
+    "role": "USER",
     "status": "DISABLED",
     "createdAt": "2024-01-15T10:30:00Z"
   }
 }
 ```
 
-**错误响应：**
-- `401` - Token 无效或缺失
-- `403` - 权限不足（非 ADMIN 角色）
-- `404` - 用户不存在
+---
+
+## 数据模型
+
+### User（用户）
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| id | number | 用户 ID |
+| username | string | 用户名 |
+| email | string | 邮箱 |
+| role | string | 角色：`ADMIN` 或 `USER` |
+| status | string | 状态：`ACTIVE` 或 `DISABLED` |
+| createdAt | string | 创建时间（ISO 8601 格式） |
+
+### ApiResponse（通用响应包装）
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| code | number | 响应状态码（200 表示成功） |
+| message | string | 响应消息 |
+| data | any | 响应数据 |
 
 ---
 
-## 完整测试流程
+## 接口汇总清单
 
-### 一键测试脚本
-
-```bash
-#!/bin/bash
-BASE_URL="http://localhost:8080"
-
-echo "========== 1. 登录获取 Token =========="
-TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' | jq -r '.data.token')
-
-echo "Token: $TOKEN"
-echo ""
-
-echo "========== 2. 管理员：获取用户列表 =========="
-curl -s -X GET "$BASE_URL/api/admin/users?page=1&pageSize=10" \
-  -H "Authorization: Bearer $TOKEN" | jq
-
-echo ""
-echo "========== 3. 管理员：创建用户 =========="
-curl -s -X POST "$BASE_URL/api/admin/users" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"testuser","email":"test@example.com","password":"password123","role":"USER","status":"ACTIVE"}' | jq
-
-echo ""
-echo "========== 4. 注册新用户 =========="
-curl -s -X POST "$BASE_URL/auth/register" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"newuser","email":"newuser@example.com","password":"123456"}' | jq
-
-echo ""
-echo "========== 5. 新用户登录 =========="
-NEW_TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"newuser","password":"123456"}' | jq -r '.data.token')
-
-echo "New Token: $NEW_TOKEN"
-echo ""
-
-echo "========== 6. AI 对话（创建会话） =========="
-RESP=$(curl -s -X POST "$BASE_URL/agent/chat" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $NEW_TOKEN" \
-  -d '{"message":"你好"}')
-
-echo "$RESP" | jq
-CONV_ID=$(echo "$RESP" | jq -r '.data.conversationId')
-
-echo ""
-echo "========== 7. 继续对话 =========="
-curl -s -X POST "$BASE_URL/agent/chat" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $NEW_TOKEN" \
-  -d "{\"message\":\"你能做什么？\",\"conversationId\":$CONV_ID}" | jq
-
-echo ""
-echo "========== 8. 获取会话列表 =========="
-curl -s -X GET "$BASE_URL/conversation/list" \
-  -H "Authorization: Bearer $NEW_TOKEN" | jq
-
-echo ""
-echo "========== 9. 获取消息列表 =========="
-curl -s -X GET "$BASE_URL/conversation/$CONV_ID/messages" \
-  -H "Authorization: Bearer $NEW_TOKEN" | jq
-
-echo ""
-echo "========== 10. 获取用户信息 =========="
-USER_ID=$(curl -s -X POST "$BASE_URL/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"newuser","password":"123456"}' | jq -r '.data.userId')
-
-curl -s -X GET "$BASE_URL/user/$USER_ID" \
-  -H "Authorization: Bearer $NEW_TOKEN" | jq
-
-echo ""
-echo "========== 11. 删除会话 =========="
-curl -s -X DELETE "$BASE_URL/conversation/$CONV_ID" \
-  -H "Authorization: Bearer $NEW_TOKEN" | jq
-
-echo ""
-echo "========== 12. 测试无认证访问（应返回 403） =========="
-curl -s -X GET "$BASE_URL/api/admin/users?page=1&pageSize=10" | jq
-
-echo ""
-echo "========== 全部完成 =========="
-```
+| 序号 | 方法 | 端点 | 说明 | 当前状态 |
+|-----|------|------|------|---------|
+| 1 | POST | `/agent/chat/stream` | SSE 流式聊天 | ✅ 已实现 |
+| 2 | GET | `/agent/chat/stream/recover` | SSE 断线恢复 | ✅ 已实现 |
+| 3 | GET | `/api/admin/users` | 获取用户列表 | ⚠️ Mock |
+| 4 | POST | `/api/admin/users` | 创建用户 | ⚠️ Mock |
+| 5 | PUT | `/api/admin/users/{id}` | 更新用户 | ⚠️ Mock |
+| 6 | DELETE | `/api/admin/users/{id}` | 删除用户 | ⚠️ Mock |
+| 7 | PATCH | `/api/admin/users/{id}/toggle-status` | 切换用户状态 | ⚠️ Mock |
 
 ---
 
-## 错误处理
+## 前端对接指南（React + TypeScript）
 
-### 全局异常处理
+### 推荐方案：`fetch-event-source`
 
-系统通过 `GlobalExceptionHandler` 统一处理所有异常。
+```typescript
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 
-### 常见错误码
-
-| HTTP 状态码 | 业务 code | 说明 | 示例场景 |
-|-------------|-----------|------|----------|
-| 200 | 200 | 成功 | 正常请求 |
-| 400 | 400 | 参数校验失败 | 缺少必填字段、格式错误 |
-| 401 | 401 | 未认证 | Token 缺失或过期 |
-| 403 | 403 | 权限不足 | 非管理员访问管理接口 |
-| 404 | 404 | 资源不存在 | 用户/会话 ID 不存在 |
-| 409 | 409 | 资源冲突 | 用户名/邮箱已存在 |
-| 500 | 500 | 服务器内部错误 | AI 服务异常、数据库错误 |
-
-### 错误响应示例
-
-**参数校验失败：**
-```json
-{
-  "code": 400,
-  "message": "密码长度至少6位",
-  "data": null
+// SSEChunkData 类型定义
+export interface SSEChunkData {
+  type: 'chunk' | 'done' | 'error' | 'ping';
+  content: string;
+  index: number;
+  reasoning?: string;
+  info?: string;
+  conversationId?: number;
 }
+
+// 使用示例
+fetchEventSource('/agent/chat/stream', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  },
+  body: JSON.stringify({ message: '你好' }),
+  onmessage(event) {
+    const data: SSEChunkData = JSON.parse(event.data);
+    
+    switch (data.type) {
+      case 'chunk':
+        // 打字机输出 content
+        setReply(prev => prev + data.content);
+        // 如果有 reasoning，显示思考过程
+        if (data.reasoning) {
+          setReasoning(prev => prev + data.reasoning);
+        }
+        break;
+      case 'done':
+        // 流式完成
+        console.log('完成，总结:', data.info);
+        break;
+      case 'error':
+        // 错误处理
+        console.error('错误:', data.message);
+        break;
+      case 'ping':
+        // 心跳，可忽略
+        break;
+    }
+  },
+  onclose() {
+    console.log('连接关闭');
+  },
+  onerror(error) {
+    console.error('SSE 错误:', error);
+  },
+});
 ```
 
-**未认证：**
-```json
-{
-  "code": 403,
-  "message": "权限不足",
-  "data": null
-}
-```
+### 原生 `fetch` 方案（无需额外依赖）
 
-**业务异常：**
-```json
-{
-  "code": 409,
-  "message": "用户名已存在",
-  "data": null
+```typescript
+const response = await fetch('/agent/chat/stream', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  },
+  body: JSON.stringify({ message: '你好' }),
+});
+
+const reader = response.body!.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  
+  buffer += decoder.decode(value, { stream: true });
+  
+  // 解析 SSE 格式
+  const lines = buffer.split('\n');
+  buffer = lines.pop() || '';
+  
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      const data: SSEChunkData = JSON.parse(line.slice(6));
+      // 处理 data...
+    }
+  }
 }
 ```
 
 ---
 
-## 附录
+## 注意事项
 
-### API 端点汇总
-
-| 模块 | 方法 | 路径 | 认证 | 权限 | 说明 |
-|------|------|------|------|------|------|
-| 认证 | POST | `/auth/register` | ❌ | 无 | 用户注册 |
-| 认证 | POST | `/auth/login` | ❌ | 无 | 用户登录 |
-| 用户 | GET | `/user/{id}` | ✅ | 本人或 ADMIN | 获取用户信息 |
-| 用户 | PUT | `/user/{id}` | ✅ | 本人或 ADMIN | 更新用户信息 |
-| Agent | POST | `/agent/chat` | ✅ | 已认证用户 | AI 对话（非流式） |
-| Agent | POST | `/agent/chat/stream` | ✅ | 已认证用户 | AI 对话（流式 SSE） |
-| 会话 | GET | `/conversation/list` | ✅ | 已认证用户 | 获取会话列表 |
-| 会话 | GET | `/conversation/{id}/messages` | ✅ | 已认证用户 | 获取消息列表 |
-| 会话 | DELETE | `/conversation/{id}` | ✅ | 已认证用户 | 删除会话 |
-| 管理 | GET | `/api/admin/users` | ✅ | ADMIN | 获取用户列表 |
-| 管理 | POST | `/api/admin/users` | ✅ | ADMIN | 创建用户 |
-| 管理 | PUT | `/api/admin/users/{id}` | ✅ | ADMIN | 更新用户 |
-| 管理 | DELETE | `/api/admin/users/{id}` | ✅ | ADMIN | 删除用户 |
-| 管理 | PATCH | `/api/admin/users/{id}/toggle-status` | ✅ | ADMIN | 切换用户状态 |
-
-### 技术栈
-
-- **框架：** Spring Boot 3.x + Java 21
-- **认证：** JWT (Spring Security)
-- **数据库：** MySQL 8.0 + MyBatis-Plus 3.5.14
-- **缓存：** Redis 6.0+
-- **AI 集成：** OpenAI API 兼容接口
-
-### 安全说明
-
-- ✅ 密码使用 BCrypt 加密存储
-- ✅ 所有查询使用参数化防止 SQL 注入
-- ✅ 逻辑删除保护数据完整性
-- ✅ **管理接口已启用 JWT 认证（需要 ADMIN 角色）**
-- ✅ CORS 配置允许前端开发服务器访问
-- ✅ Token 24 小时自动过期
-- ✅ 无状态设计（不存储 session）
-
----
-
-**文档版本：** v3.0.0  
-**更新日期：** 2026-04-09  
-**更新说明：** 启用 JWT 认证，所有 Admin API 需要 ADMIN 角色  
-**维护者：** caius (luoxiongca5@gmail.com)
+1. **代理配置**: 所有 `/agent` 开头的请求会通过 Vite 代理转发到 `http://localhost:8080`
+2. **认证**: `/agent/chat/stream` 需要 `Authorization: Bearer <token>` 请求头
+3. **SSE 格式**: 聊天接口使用 Server-Sent Events，`data` 字段为 JSON 字符串，需 `JSON.parse()` 解析
+4. **错误处理**: 所有接口统一返回 `ApiResponse` 格式，SSE 接口除外
+5. **数据标准化**: 无论 Python 服务返回什么格式，Java 后端都会标准化为上述 `SSEChunkData` 格式
+6. **断线恢复**: 前端应监听 `onclose` 事件，断开后调用 `/recover` 接口恢复
