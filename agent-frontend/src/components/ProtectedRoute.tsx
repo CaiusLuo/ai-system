@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
-import { isLoggedIn, isAdmin } from '../services/auth';
+import { getAuthStatus, isAdmin } from '../services/auth';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -8,10 +8,11 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-  const loggedIn = isLoggedIn();
+  const authStatus = getAuthStatus();
   
-  if (!loggedIn) {
-    return <Navigate to="/auth" replace />;
+  if (authStatus !== 'valid') {
+    const target = authStatus === 'expired' ? '/auth?reason=session-expired' : '/auth';
+    return <Navigate to={target} replace />;
   }
 
   if (requireAdmin && !isAdmin()) {

@@ -18,6 +18,8 @@ export interface LoginResponse {
   userId: number;
   username: string;
   role: 'ADMIN' | 'USER';
+  expiresAt?: number;
+  expiresInSeconds?: number;
 }
 
 // ==================== 用户相关 ====================

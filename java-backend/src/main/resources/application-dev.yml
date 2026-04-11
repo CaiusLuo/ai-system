@@ -33,9 +33,15 @@ logging:
 # JWT 配置
 jwt:
   secret: ${JWT_SECRET:change-me-in-local-config}
-  expiration: 86400000  # 24小时
+  expiration: 43200000  # 12小时
   header: Authorization
   prefix: "Bearer "
+
+# 认证安全配置
+auth:
+  rate-limit:
+    register-per-hour: 5
+    register-per-day: 20
 
 # Python Agent 服务配置
 python-agent:

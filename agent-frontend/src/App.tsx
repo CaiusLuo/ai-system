@@ -1,7 +1,7 @@
 import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
-import { isLoggedIn } from './services/auth'
+import { getAuthStatus } from './services/auth'
 
 // 懒加载页面组件（代码分割）
 const LandingPage = lazy(() => import('./pages/LandingPage'))
@@ -21,7 +21,9 @@ function PageLoader() {
 }
 
 function App() {
-  const loggedIn = isLoggedIn();
+  const authStatus = getAuthStatus();
+  const loggedIn = authStatus === 'valid';
+  const authRedirect = authStatus === 'expired' ? '/auth?reason=session-expired' : '/auth';
 
   return (
     <BrowserRouter>
@@ -33,6 +35,8 @@ function App() {
               <ProtectedRoute>
                 <ChatPage />
               </ProtectedRoute>
+            ) : authStatus === 'expired' || authStatus === 'invalid' ? (
+              <Navigate to={authRedirect} replace />
             ) : (
               <LandingPage />
             )

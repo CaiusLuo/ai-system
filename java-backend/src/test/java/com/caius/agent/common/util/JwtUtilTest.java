@@ -142,4 +142,23 @@ class JwtUtilTest {
         assertNotNull(claims.getIssuedAt());
         assertNotNull(claims.getExpiration());
     }
+
+    @Test
+    void getExpirationTimestamp_Success() {
+        String token = jwtUtil.generateToken(1L, "testuser", "USER");
+
+        long expirationTimestamp = jwtUtil.getExpirationTimestamp(token);
+
+        assertTrue(expirationTimestamp > System.currentTimeMillis());
+    }
+
+    @Test
+    void getRemainingSeconds_Success() {
+        String token = jwtUtil.generateToken(1L, "testuser", "USER");
+
+        long remainingSeconds = jwtUtil.getRemainingSeconds(token);
+
+        assertTrue(remainingSeconds > 0);
+        assertTrue(remainingSeconds <= 86400);
+    }
 }

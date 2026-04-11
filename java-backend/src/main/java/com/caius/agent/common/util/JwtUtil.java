@@ -82,6 +82,29 @@ public class JwtUtil {
     }
 
     /**
+     * 获取 Token 过期时间
+     */
+    public Date getExpiration(String token) {
+        Claims claims = parseToken(token);
+        return claims.getExpiration();
+    }
+
+    /**
+     * 获取 Token 过期时间戳（毫秒）
+     */
+    public long getExpirationTimestamp(String token) {
+        return getExpiration(token).getTime();
+    }
+
+    /**
+     * 获取 Token 剩余有效秒数
+     */
+    public long getRemainingSeconds(String token) {
+        long remainingMillis = getExpirationTimestamp(token) - System.currentTimeMillis();
+        return Math.max(0L, remainingMillis / 1000);
+    }
+
+    /**
      * 验证 Token 是否过期
      */
     public boolean isTokenExpired(String token) {

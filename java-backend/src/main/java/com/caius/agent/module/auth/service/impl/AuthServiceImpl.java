@@ -52,6 +52,8 @@ public class AuthServiceImpl implements AuthService {
         result.put("userId", user.getId());
         result.put("username", user.getUsername());
         result.put("role", user.getRole());
+        result.put("expiresAt", jwtUtil.getExpirationTimestamp(token));
+        result.put("expiresInSeconds", jwtUtil.getRemainingSeconds(token));
 
         return result;
     }
