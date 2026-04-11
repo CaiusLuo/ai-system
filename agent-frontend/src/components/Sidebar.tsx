@@ -53,7 +53,7 @@ export default function Sidebar({
   onLogout,
   canCreateConversation = true,
   onOpenAgentSettings,
-  agentName = 'AI',
+  agentName = '助手',
 }: SidebarProps) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);

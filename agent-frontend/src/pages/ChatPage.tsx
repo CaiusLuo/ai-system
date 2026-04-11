@@ -63,9 +63,10 @@ export default function ChatPage() {
   const [userDisabled, setUserDisabled] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [agentName, setAgentName] = useState(() => {
-    return localStorage.getItem('agent_name') || 'AI';
+    return localStorage.getItem('agent_name') || '助手';
   });
   const [showAgentSettings, setShowAgentSettings] = useState(false);
+  const [tempAgentName, setTempAgentName] = useState('');
   const useLocalMode = true;
   const navigate = useNavigate();
   const savedStreamingMessageRef = useRef<Set<string>>(new Set());
@@ -382,7 +383,10 @@ export default function ChatPage() {
         onOpenAdmin={handleOpenAdmin}
         onLogout={handleLogout}
         canCreateConversation={!userDisabled}
-        onOpenAgentSettings={() => setShowAgentSettings(true)}
+        onOpenAgentSettings={() => {
+          setTempAgentName(agentName);
+          setShowAgentSettings(true);
+        }}
         agentName={agentName}
       />
 
@@ -512,33 +516,36 @@ export default function ChatPage() {
               <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-4">Agent 名称</h2>
               <input
                 type="text"
-                value={agentName}
+                value={tempAgentName}
                 onChange={(e) => {
-                  const newName = e.target.value.trim();
-                  setAgentName(newName || 'AI');
-                  localStorage.setItem('agent_name', newName || 'AI');
+                  setTempAgentName(e.target.value.trim());
                 }}
                 maxLength={20}
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600"
                 placeholder="输入名称"
               />
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                此名称将显示在 AI 消息旁边
+                此名称将显示在消息旁边
               </p>
             </div>
 
             <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-700">
               <button
                 onClick={() => {
-                  setAgentName('AI');
-                  localStorage.setItem('agent_name', 'AI');
+                  setTempAgentName('助手');
                 }}
                 className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
               >
                 重置
               </button>
               <button
-                onClick={() => setShowAgentSettings(false)}
+                onClick={() => {
+                  if (tempAgentName) {
+                    setAgentName(tempAgentName);
+                    localStorage.setItem('agent_name', tempAgentName);
+                  }
+                  setShowAgentSettings(false);
+                }}
                 className="px-4 py-2 text-sm text-white bg-gray-900 dark:bg-gray-100 hover:bg-gray-800 dark:hover:bg-gray-200 rounded-lg transition-colors"
               >
                 完成
