@@ -1,4 +1,4 @@
-import { getToken } from './auth';
+import { getAuthStatus, getToken, redirectToLogin } from './auth';
 import { SSEChunkData, SEDoneData, SEEErrorData, SEPingData } from '../types';
 
 export type { SSEChunkData, SEDoneData, SEEErrorData, SEPingData };
@@ -84,6 +84,19 @@ export async function createSSEConnection(
   handlers: SSEHandlers,
   signal: AbortSignal
 ): Promise<void> {
+  const authStatus = getAuthStatus();
+  if (authStatus === 'expired') {
+    handlers.onError?.({ type: 'error', message: '登录已过期，请重新登录' });
+    redirectToLogin('session-expired');
+    return;
+  }
+
+  if (authStatus === 'invalid') {
+    handlers.onError?.({ type: 'error', message: '登录信息无效，请重新登录' });
+    redirectToLogin('unauthorized');
+    return;
+  }
+
   const requestBody: any = { message };
   if (conversationId !== undefined) {
     requestBody.conversationId = conversationId;
@@ -114,11 +127,24 @@ export async function createSSEConnection(
 
   // 检查响应状态
   if (!response.ok) {
-    const errorMessage = response.status === 401 
+    let errorMessage = response.status === 401
       ? '认证失败，请重新登录'
-      : response.status === 429 
+      : response.status === 429
         ? '请求过于频繁，请稍后重试'
         : `服务器错误 (${response.status})`;
+
+    if (response.status === 401) {
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData?.message || errorMessage;
+      } catch {
+        // ignore JSON parse failure and keep fallback message
+      }
+
+      handlers.onError?.({ type: 'error', message: errorMessage });
+      redirectToLogin(errorMessage.includes('过期') ? 'session-expired' : 'unauthorized');
+      return;
+    }
     
     handlers.onError?.({ type: 'error', message: errorMessage });
     return;

@@ -67,6 +67,8 @@ class AuthModuleTest {
             when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(testUser);
             when(passwordEncoder.matches("password123", "$2a$10$encodedPassword")).thenReturn(true);
             when(jwtUtil.generateToken(1L, "testuser", "USER")).thenReturn("mockToken");
+            when(jwtUtil.getExpirationTimestamp("mockToken")).thenReturn(1744360000000L);
+            when(jwtUtil.getRemainingSeconds("mockToken")).thenReturn(43200L);
 
             LoginRequest request = new LoginRequest();
             request.setUsername("testuser");
@@ -78,6 +80,8 @@ class AuthModuleTest {
             assertEquals(1L, result.get("userId"));
             assertEquals("testuser", result.get("username"));
             assertEquals("USER", result.get("role"));
+            assertEquals(1744360000000L, result.get("expiresAt"));
+            assertEquals(43200L, result.get("expiresInSeconds"));
         }
 
         @Test

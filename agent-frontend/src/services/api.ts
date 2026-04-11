@@ -1,6 +1,6 @@
 // 统一 API 请求封装
 
-import { getToken, removeToken } from './auth';
+import { getAuthStatus, getToken, redirectToLogin, removeToken } from './auth';
 
 export interface ApiResponse<T = any> {
   code: number;
@@ -22,11 +22,14 @@ class ApiError extends Error {
 
 // 处理认证失败
 function handleUnauthorized(): void {
-  removeToken();
-  // 如果当前不在登录页面，跳转到登录页
-  if (window.location.pathname !== '/auth') {
-    window.location.href = '/auth';
+  const authStatus = getAuthStatus();
+  if (authStatus === 'expired') {
+    redirectToLogin('session-expired');
+    return;
   }
+
+  removeToken();
+  redirectToLogin('unauthorized');
 }
 
 // 统一请求方法
@@ -34,6 +37,17 @@ export async function request<T>(
   url: string,
   options?: RequestInit
 ): Promise<ApiResponse<T>> {
+  const authStatus = getAuthStatus();
+  if (authStatus === 'expired') {
+    redirectToLogin('session-expired');
+    throw new ApiError(401, 401, '登录已过期，请重新登录');
+  }
+
+  if (authStatus === 'invalid') {
+    redirectToLogin('unauthorized');
+    throw new ApiError(401, 401, '登录信息无效，请重新登录');
+  }
+
   const token = getToken();
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -48,8 +62,22 @@ export async function request<T>(
 
   // 处理 401 未授权
   if (response.status === 401) {
-    handleUnauthorized();
-    throw new ApiError(401, 401, '认证失败，请重新登录');
+    let errorMessage = '认证失败，请重新登录';
+
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData?.message || errorMessage;
+    } catch {
+      // ignore JSON parse failure and keep fallback message
+    }
+
+    if (errorMessage.includes('过期')) {
+      redirectToLogin('session-expired');
+    } else {
+      handleUnauthorized();
+    }
+
+    throw new ApiError(401, 401, errorMessage);
   }
 
   // 处理 403 权限不足

@@ -9,6 +9,12 @@ const USERNAME_KEY = 'username';
 const USER_ROLE_KEY = 'userRole';
 const USER_STATUS_KEY = 'userStatus';
 
+export type AuthStatus = 'valid' | 'missing' | 'expired' | 'invalid';
+
+interface JwtPayload {
+  exp?: number;
+}
+
 // Token 管理
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
@@ -24,6 +30,77 @@ export function removeToken(): void {
   localStorage.removeItem(USERNAME_KEY);
   localStorage.removeItem(USER_ROLE_KEY);
   localStorage.removeItem(USER_STATUS_KEY);
+}
+
+function decodeBase64Url(value: string): string | null {
+  try {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const binary = window.atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+export function getTokenPayload(token: string | null = getToken()): JwtPayload | null {
+  if (!token) return null;
+
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const decoded = decodeBase64Url(parts[1]);
+  if (!decoded) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(decoded) as JwtPayload;
+  } catch {
+    return null;
+  }
+}
+
+export function getTokenExpiresAt(token: string | null = getToken()): number | null {
+  const payload = getTokenPayload(token);
+  if (!payload?.exp) {
+    return null;
+  }
+  return payload.exp * 1000;
+}
+
+export function getAuthStatus(): AuthStatus {
+  const token = getToken();
+  if (!token) {
+    return 'missing';
+  }
+
+  const expiresAt = getTokenExpiresAt(token);
+  if (!expiresAt) {
+    removeToken();
+    return 'invalid';
+  }
+
+  if (expiresAt <= Date.now()) {
+    removeToken();
+    return 'expired';
+  }
+
+  return 'valid';
+}
+
+export function redirectToLogin(reason: 'session-expired' | 'unauthorized' = 'unauthorized'): void {
+  removeToken();
+
+  const target = reason === 'session-expired' ? '/auth?reason=session-expired' : '/auth';
+  const current = `${window.location.pathname}${window.location.search}`;
+
+  if (current !== target) {
+    window.location.assign(target);
+  }
 }
 
 // 用户信息管理
@@ -53,7 +130,7 @@ export function getUserInfo(): { userId: number; username: string; role: 'ADMIN'
 }
 
 export function isLoggedIn(): boolean {
-  return !!getToken();
+  return getAuthStatus() === 'valid';
 }
 
 export function isAdmin(): boolean {
