@@ -12,6 +12,7 @@ import com.caius.agent.module.admin.service.AdminUserService;
 import com.caius.agent.module.user.entity.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -29,6 +30,7 @@ import java.util.stream.Collectors;
 public class AdminUserServiceImpl implements AdminUserService {
 
     private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
 
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
@@ -40,9 +42,8 @@ public class AdminUserServiceImpl implements AdminUserService {
         // 限制最大 pageSize
         pageSize = Math.min(pageSize, 100);
 
-        // 构建查询条件
+        // 构建查询条件（MyBatis-Plus 会自动过滤逻辑删除的数据）
         LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(User::getDeleted, 0); // 只查询未删除的数据
 
         // 关键词搜索（匹配用户名或邮箱）
         if (StringUtils.hasText(request.getKeyword())) {
@@ -96,18 +97,16 @@ public class AdminUserServiceImpl implements AdminUserService {
             throw new BusinessException(400, "状态只能是 ACTIVE 或 DISABLED");
         }
 
-        // 检查用户名是否已存在
+        // 检查用户名是否已存在（MyBatis-Plus 会自动过滤逻辑删除的数据）
         LambdaQueryWrapper<User> usernameQuery = new LambdaQueryWrapper<>();
-        usernameQuery.eq(User::getUsername, request.getUsername())
-                .eq(User::getDeleted, 0);
+        usernameQuery.eq(User::getUsername, request.getUsername());
         if (userMapper.selectCount(usernameQuery) > 0) {
             throw new BusinessException(409, "用户名已存在");
         }
 
         // 检查邮箱是否已存在
         LambdaQueryWrapper<User> emailQuery = new LambdaQueryWrapper<>();
-        emailQuery.eq(User::getEmail, request.getEmail())
-                .eq(User::getDeleted, 0);
+        emailQuery.eq(User::getEmail, request.getEmail());
         if (userMapper.selectCount(emailQuery) > 0) {
             throw new BusinessException(409, "邮箱已存在");
         }
@@ -116,10 +115,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         User user = new User();
         user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
-        user.setPassword(request.getPassword()); // 密码加密在拦截器中处理
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(request.getRole().toUpperCase());
         user.setStatus("ACTIVE".equals(request.getStatus().toUpperCase()) ? 1 : 0);
-        user.setDeleted(0);
 
         userMapper.insert(user);
 
@@ -132,7 +130,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Transactional(rollbackFor = Exception.class)
     public UserListResponse.UserDTO updateUser(Long id, UserUpdateRequest request) {
         User existUser = userMapper.selectById(id);
-        if (existUser == null || existUser.getDeleted() == 1) {
+        if (existUser == null) {
             throw new BusinessException(404, "用户不存在");
         }
 
@@ -189,13 +187,12 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteUser(Long id) {
         User existUser = userMapper.selectById(id);
-        if (existUser == null || existUser.getDeleted() == 1) {
+        if (existUser == null) {
             throw new BusinessException(404, "用户不存在");
         }
 
-        // 逻辑删除
-        existUser.setDeleted(1);
-        userMapper.updateById(existUser);
+        // 使用 MyBatis-Plus 的逻辑删除（会自动设置 deleted=1）
+        userMapper.deleteById(id);
 
         log.info("删除用户成功: id={}, username={}", id, existUser.getUsername());
     }

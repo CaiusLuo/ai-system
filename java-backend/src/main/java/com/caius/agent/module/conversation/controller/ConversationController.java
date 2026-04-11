@@ -1,8 +1,8 @@
 package com.caius.agent.module.conversation.controller;
 
 import com.caius.agent.common.result.Result;
-import com.caius.agent.module.conversation.entity.Conversation;
-import com.caius.agent.module.conversation.entity.Message;
+import com.caius.agent.module.conversation.dto.ConversationDTO;
+import com.caius.agent.module.conversation.dto.MessageDTO;
 import com.caius.agent.module.conversation.service.ConversationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -21,15 +21,15 @@ public class ConversationController {
     private final ConversationService conversationService;
 
     @GetMapping("/list")
-    public Result<List<Conversation>> listConversations(@AuthenticationPrincipal Long userId) {
-        List<Conversation> conversations = conversationService.getConversations(userId);
+    public Result<List<ConversationDTO>> listConversations(@AuthenticationPrincipal Long userId) {
+        List<ConversationDTO> conversations = conversationService.getConversations(userId);
         return Result.success(conversations);
     }
 
     @GetMapping("/{id}/messages")
-    public Result<List<Message>> getMessages(@AuthenticationPrincipal Long userId,
+    public Result<List<MessageDTO>> getMessages(@AuthenticationPrincipal Long userId,
                                              @PathVariable Long id) {
-        List<Message> messages = conversationService.getMessages(id, userId);
+        List<MessageDTO> messages = conversationService.getMessages(id, userId);
         return Result.success(messages);
     }
 

@@ -1,6 +1,7 @@
+
 """Agent 节点定义"""
 import logging
-from typing import List
+
 from ...domain.entities import AgentState, Message
 from ...domain.protocols import ConversationRepository, LLMGateway
 from ...prompts.system import SYSTEM_PROMPT
@@ -45,7 +46,7 @@ def create_generate_reply_node(llm_gateway: LLMGateway):
     return generate_reply_node
 
 
-def _build_messages(state: AgentState) -> List[Message]:
+def _build_messages(state: AgentState) -> list[Message]:
     """构建完整的消息上下文"""
     messages = []
 

@@ -1,5 +1,6 @@
 package com.caius.agent.module.user.service;
 
+import com.caius.agent.module.user.dto.UserDTO;
 import com.caius.agent.module.user.entity.User;
 
 /**
@@ -8,9 +9,9 @@ import com.caius.agent.module.user.entity.User;
 public interface UserService {
 
     /**
-     * 根据 ID 获取用户
+     * 根据 ID 获取用户（返回 DTO，不包含密码）
      */
-    User getUserById(Long userId);
+    UserDTO getUserById(Long userId);
 
     /**
      * 更新用户信息

@@ -1,13 +1,68 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" dir="ltr">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- SEO 核心 -->
+    <title>求职 Agent - AI 智能找工作 | 简历优化 | 自动投递</title>
+    <meta name="description" content="求职 Agent 是 AI 驱动的求职工具，支持 JD 计划设置、岗位信息获取、简历针对性优化、自动化投递等功能，帮你高效找到理想工作。" />
+    <meta name="keywords" content="求职,找工作,简历优化,自动投递,JD分析,岗位搜索,面试,职业规划,AI求职,智能招聘" />
+    <meta name="author" content="求职 Agent" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://job-agent.example.com/" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="apple-touch-icon" href="/logo.svg" />
+
+    <!-- Open Graph (Facebook, LinkedIn, 微信等) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="求职 Agent - AI 智能求职工具" />
+    <meta property="og:description" content="JD 计划设置、岗位信息获取、简历优化、自动化投递——一站式 AI 求职平台。" />
+    <meta property="og:url" content="https://job-agent.example.com/" />
+    <meta property="og:image" content="https://job-agent.example.com/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="求职 Agent 界面截图" />
+    <meta property="og:site_name" content="求职 Agent" />
+    <meta property="og:locale" content="zh_CN" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="求职 Agent - AI 智能求职工具" />
+    <meta name="twitter:description" content="AI 驱动的求职工具，帮你高效找到理想工作。" />
+    <meta name="twitter:image" content="https://job-agent.example.com/og-image.jpg" />
+
+    <!-- 移动端优化 -->
+    <meta name="theme-color" content="#059669" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- 预连接关键资源（优化 LCP） -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- 结构化数据 (JSON-LD) - 初始占位，由 JS 动态注入 -->
+    <script id="ld-webapp" type="application/ld+json"></script>
+    <script id="ld-org" type="application/ld+json"></script>
+    <script id="ld-faq" type="application/ld+json"></script>
+
+    <!-- 性能优化：预加载关键字体（如有） -->
+    <!-- <link rel="preload" href="/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin /> -->
   </head>
-  <body>
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <!--  noscript 后备内容（SEO 友好） -->
+    <noscript>
+      <div style="padding: 2rem; text-align: center; font-family: system-ui, sans-serif;">
+        <h1>求职 Agent</h1>
+        <p>请启用 JavaScript 以使用求职 Agent 功能。</p>
+        <p>求职 Agent 是 AI 驱动的求职工具，支持 JD 计划设置、岗位信息获取、简历优化、自动化投递等功能。</p>
+      </div>
+    </noscript>
   </body>
 </html>

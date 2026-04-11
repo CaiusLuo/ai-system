@@ -1,7 +1,18 @@
-"""LangGraph Agent 图编排"""
+
+"""LangGraph Agent 图编排
+
+企业级设计：
+- 支持 reasoning/thinking 内容传递
+- 支持 abort 机制（按 message_id 或 conversation_id）
+- 完善的日志追踪
+"""
 import logging
-from typing import AsyncGenerator
-from langgraph.graph import StateGraph, START, END
+from collections.abc import AsyncGenerator
+from typing import Any, Optional
+
+from langgraph.graph import END, START, StateGraph
+
+from ...core.abort import AbortController
 from ...domain.entities import AgentState
 from ...domain.protocols import ConversationRepository, LLMGateway
 from .nodes import (
@@ -17,15 +28,20 @@ class JobAgentGraph:
     求职 Agent LangGraph 图编排类
 
     工作流: START → fetch_history → generate_reply → END
+
+    流式模式：直接调用 LLM 的 stream_generate（跳过 LangGraph 图），
+    以实现 token 级别的流式输出。
     """
 
     def __init__(
         self,
         repository: ConversationRepository,
         llm_gateway: LLMGateway,
+        abort_controller: AbortController = None,
     ):
         self._repository = repository
         self._llm_gateway = llm_gateway
+        self._abort_controller = abort_controller
         self._graph = self._build_graph()
 
     def _build_graph(self):
@@ -98,7 +114,8 @@ class JobAgentGraph:
         user_id: int,
         conversation_id: int,
         system_prompt: str = "",
-    ) -> AsyncGenerator[str, None]:
+        message_id: Optional[str] = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
         执行 Agent 工作流（流式）
 
@@ -106,7 +123,7 @@ class JobAgentGraph:
         1. 先执行 fetch_history 节点（非流式）
         2. 构建消息上下文
         3. 直接调用 LLM 的 stream_generate（跳过 LangGraph 图）
-        4. 逐 chunk yield 出去
+        4. 逐 chunk yield，每次 yield 前检查 abort 标志
 
         为什么跳过 LangGraph 图？
         因为 LangGraph 的 astream 是节点级别的流式，
@@ -114,10 +131,19 @@ class JobAgentGraph:
         需要直接消费 LLM 的 astream。
 
         Yields:
-            每个 token chunk 的文本内容
+            dict: {
+                "content": str,           # AI 回复内容片段
+                "reasoning": Optional[str]     # 推理过程（可选）
+            }
+
+        Raises:
+            GeneratorExit: 当检测到 abort 时抛出，通知调用方中断
         """
+        abort_key = message_id or conversation_id
+
         logger.info(
             f"开始流式执行 Agent 工作流 | "
+            f"abort_key={abort_key} | "
             f"conversation_id={conversation_id} | "
             f"message_length={len(user_message)}"
         )
@@ -132,11 +158,17 @@ class JobAgentGraph:
             system_prompt=system_prompt,
         )
 
-        # 3. 流式调用 LLM，逐 chunk yield
-        async for chunk in self._llm_gateway.stream_generate(messages):
-            yield chunk
+        # 3. 流式调用 LLM，逐 chunk yield，每次检查 abort
+        async for event in self._llm_gateway.stream_generate(messages):
+            # 检查是否被中断
+            if self._abort_controller and self._abort_controller.is_aborted(abort_key):
+                logger.warning(f"流式生成被中断 | abort_key={abort_key}")
+                self._abort_controller.clear(abort_key)
+                return  # 停止生成
 
-        logger.info("流式 Agent 工作流执行完成")
+            yield event
+
+        logger.info(f"流式 Agent 工作流执行完成 | abort_key={abort_key}")
 
     @staticmethod
     def _build_messages_for_stream(

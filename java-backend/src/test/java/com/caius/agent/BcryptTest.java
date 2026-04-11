@@ -3,17 +3,16 @@ package com.caius.agent;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
-public class BcryptGenCorrectTest {
+public class BcryptTest {
     @Test
-    void generateCorrect() {
+    void generateBcrypt() {
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
         String raw = "admin123";
         String encoded = encoder.encode(raw);
-        
-        System.out.println("BEGIN_HASH");
-        System.out.println(encoded);
-        System.out.println("END_HASH");
-        System.out.println("Length: " + encoded.length());
+        System.out.println("==================");
+        System.out.println("Raw password: " + raw);
+        System.out.println("BCrypt hash: " + encoded);
         System.out.println("Verify: " + encoder.matches(raw, encoded));
+        System.out.println("==================");
     }
 }

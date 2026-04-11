@@ -1,32 +1,77 @@
-import { useRef, useState, useEffect as useEffectHook, useMemo } from 'react';
+import { useRef, useState, useEffect as useEffectHook, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSSEChat, Message } from '../hooks/useSSEChat';
+import { useLocalChatStorage, getStoredConversations } from '../hooks/useLocalChatStorage';
 import Sidebar from '../components/Sidebar';
 import MessageBubble from '../components/MessageBubble';
+import MessageSkeleton from '../components/MessageSkeleton';
 import ChatInput from '../components/ChatInput';
+import AdminPanel from './AdminPanel';
 import { logout, getUserInfo } from '../services/auth';
-import { getConversationList, deleteConversation, Conversation } from '../services/conversation';
+
+// 本地消息转换为 Message 格式
+function storedToMessage(msg: { role: string; content: string; reasoning?: string; timestamp?: number }): Message {
+  return {
+    role: msg.role as 'user' | 'assistant',
+    content: msg.content,
+    reasoning: msg.reasoning,
+  };
+}
 
 export default function ChatPage() {
   const {
-    messages,
+    messages: remoteMessages,
     currentStreamingMessage,
     currentStreamingReasoning,
     isLoading,
     error,
-    conversationId,
+    conversationId: remoteConvId,
     sendMessage,
     abortStream,
     clearMessages,
     loadConversation,
   } = useSSEChat();
 
+  const {
+    getCurrentConvId,
+    getCurrentConversation,
+    getConversationList: getLocalConvList,
+    createConversation,
+    addMessage,
+    deleteConversation: deleteLocalConv,
+    switchConversation,
+    syncBackendId,
+  } = useLocalChatStorage();
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [localConversations, setLocalConversations] = useState<Array<{
+    id: string;
+    title: string;
+    backendId: number | null;
+    updatedAt: number;
+    lastMessageContent: string | null;
+    lastMessageTime: string | null;
+  }>>([]);
+  const [currentLocalConvId, setCurrentLocalConvId] = useState<string | null>(null);
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
+  const [isSwitchingConversation, setIsSwitchingConversation] = useState(false);
+  const [hasLoadedFromBackend, setHasLoadedFromBackend] = useState(false);
   const [username, setUsername] = useState('');
   const [userRole, setUserRole] = useState('');
+  const [userDisabled, setUserDisabled] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [agentName, setAgentName] = useState(() => {
+    return localStorage.getItem('agent_name') || 'AI';
+  });
+  const [showAgentSettings, setShowAgentSettings] = useState(false);
+  const useLocalMode = true;
   const navigate = useNavigate();
+  const savedStreamingMessageRef = useRef<Set<string>>(new Set());
+  
+  // 智能滚动：用户手动滚动时不自动跟随
+  const shouldAutoScrollRef = useRef(true);
 
   // 加载用户信息
   useEffectHook(() => {
@@ -34,88 +79,216 @@ export default function ChatPage() {
     if (userInfo) {
       setUsername(userInfo.username);
       setUserRole(userInfo.role);
+      setUserDisabled(userInfo.status === 'DISABLED');
+    }
+
+    if (window.location.hash === '#admin' && userInfo?.role === 'ADMIN') {
+      setShowAdminPanel(true);
     }
   }, []);
 
-  // 加载会话列表
-  const loadConversations = async () => {
-    try {
-      const response = await getConversationList();
-      if (response.code === 200 && response.data) {
-        setConversations(response.data);
+  // 加载本地对话列表
+  const refreshLocalConvList = useCallback(() => {
+    const list = getLocalConvList();
+    setLocalConversations(list);
+  }, [getLocalConvList]);
+
+  useEffectHook(() => {
+    refreshLocalConvList();
+  }, [refreshLocalConvList]);
+
+  // 加载当前本地对话的消息
+  useEffectHook(() => {
+    const conv = getCurrentConversation();
+    if (conv) {
+      setCurrentLocalConvId(getCurrentConvId());
+      setLocalMessages(conv.messages.map(storedToMessage));
+
+      const backendId = conv.backendId || conv.id;
+      if (backendId && !hasLoadedFromBackend) {
+        setHasLoadedFromBackend(true);
+        loadConversation(Number(backendId)).then(() => {
+          // loadConversation 会更新 remoteMessages
+        }).catch(error => {
+          console.warn('[ChatPage] 从后端加载消息失败，使用本地缓存:', error);
+        });
       }
-    } catch (error) {
-      console.error('[Chat] Failed to load conversations:', error);
+    } else {
+      setCurrentLocalConvId(getCurrentConvId());
+      setLocalMessages([]);
     }
-  };
+  }, [getCurrentConvId, getCurrentConversation]);
 
+  // 当 remoteMessages 更新时，同步到 localMessages
   useEffectHook(() => {
-    loadConversations();
-  }, []);
+    if (hasLoadedFromBackend && remoteMessages.length > 0) {
+      setLocalMessages(remoteMessages);
+    }
+  }, [remoteMessages, hasLoadedFromBackend]);
 
-  // 自动滚动到底部 - 使用 instant 避免平滑滚动动画重叠
+  // 流式输出完成时保存消息到本地
   useEffectHook(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
-  }, [messages, currentStreamingMessage]);
+    if (!isLoading && (currentStreamingMessage || currentStreamingReasoning)) {
+      const messageKey = currentStreamingMessage.substring(0, 50);
 
+      if (!savedStreamingMessageRef.current.has(messageKey)) {
+        savedStreamingMessageRef.current.add(messageKey);
+
+        if (useLocalMode) {
+          addMessage({
+            role: 'assistant',
+            content: currentStreamingMessage,
+            reasoning: currentStreamingReasoning || undefined,
+          });
+          refreshLocalConvList();
+
+          setLocalMessages(prev => {
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === currentStreamingMessage) {
+              return prev;
+            }
+            return [...prev, {
+              role: 'assistant' as const,
+              content: currentStreamingMessage,
+              reasoning: currentStreamingReasoning || undefined,
+            }];
+          });
+        }
+      }
+    }
+
+    if (isLoading && currentStreamingMessage === '') {
+      savedStreamingMessageRef.current.clear();
+    }
+  }, [isLoading, currentStreamingMessage, currentStreamingReasoning, useLocalMode, addMessage, refreshLocalConvList]);
+
+  // 发送消息
   const handleSend = (message: string) => {
-    // 防止在流式输出过程中发送新消息
-    if (isLoading) {
-      console.warn('[Chat] Cannot send message while streaming');
+    if (isLoading) return;
+    if (userDisabled) {
+      console.warn('[Chat] User is disabled, cannot send message');
       return;
     }
-    // 使用 hook 中的 conversationId，实现会话连续性
-    sendMessage(message, conversationId || undefined);
-  };
 
-  const handleNewConversation = () => {
-    // 防止在流式输出过程中创建新对话
-    if (isLoading) {
-      console.warn('[Chat] Cannot create new conversation while streaming');
-      return;
-    }
-    clearMessages();
-    setIsMobileSidebarOpen(false);
-  };
+    if (useLocalMode) {
+      const userMsg: Message = { role: 'user', content: message };
+      setLocalMessages(prev => [...prev, userMsg]);
+      addMessage({ role: 'user', content: message });
 
-  // 清空对话按钮操作（需要保护）
-  const handleClearMessages = () => {
-    // 防止在流式输出过程中清空对话
-    if (isLoading) {
-      console.warn('[Chat] Cannot clear messages while streaming');
-      return;
-    }
-    clearMessages();
-  };
-
-  const handleSelectConversation = async (id: number) => {
-    // 防止在流式输出过程中加载其他对话
-    if (isLoading) {
-      console.warn('[Chat] Cannot load conversation while streaming');
-      return;
-    }
-    await loadConversation(id);
-    setIsMobileSidebarOpen(false);
-  };
-
-  const handleDeleteConversation = async (id: number) => {
-    // 防止在流式输出过程中删除对话
-    if (isLoading) {
-      console.warn('[Chat] Cannot delete conversation while streaming');
-      return;
-    }
-    try {
-      await deleteConversation(id);
-      // 如果删除的是当前会话，清空消息
-      if (conversationId === id) {
-        clearMessages();
+      if (!getCurrentConvId()) {
+        createConversation(message);
       }
-      // 重新加载列表
-      loadConversations();
-    } catch (error) {
-      console.error('[Chat] Failed to delete conversation:', error);
     }
+
+    sendMessage(message, remoteConvId || undefined);
+    
+    // 发送消息后恢复自动滚动
+    shouldAutoScrollRef.current = true;
   };
+
+  // 新建对话
+  const handleNewConversation = () => {
+    if (isLoading) return;
+    if (userDisabled) {
+      console.warn('[Chat] User is disabled, cannot create new conversation');
+      return;
+    }
+
+    if (useLocalMode) {
+      createConversation();
+      setLocalMessages([]);
+      setHasLoadedFromBackend(false);
+      refreshLocalConvList();
+    } else {
+      clearMessages();
+    }
+    setIsMobileSidebarOpen(false);
+  };
+
+  // 选择本地对话
+  const handleSelectConversation = useCallback(async (id: number | string) => {
+    if (isLoading) return;
+
+    setIsSwitchingConversation(true);
+    setHasLoadedFromBackend(false);
+
+    try {
+      switchConversation(id as string);
+
+      const convId = id as string;
+      const convs = getStoredConversations();
+      const conv = convs[convId];
+
+      if (conv) {
+        const msgs: Message[] = conv.messages.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+          reasoning: msg.reasoning,
+        }));
+        setLocalMessages(msgs);
+
+        const backendId = conv.backendId || conv.id;
+        if (backendId) {
+          try {
+            await loadConversation(Number(backendId));
+            setHasLoadedFromBackend(true);
+          } catch (error) {
+            console.warn('[ChatPage] 从后端加载消息失败，使用本地缓存:', error);
+          }
+        }
+      } else {
+        setLocalMessages([]);
+      }
+
+      setCurrentLocalConvId(convId);
+    } finally {
+      setIsSwitchingConversation(false);
+    }
+
+    setIsMobileSidebarOpen(false);
+  }, [isLoading, switchConversation, loadConversation]);
+
+  // 删除本地对话
+  const handleDeleteConversation = async (id: number | string) => {
+    if (isLoading) return;
+
+    const convId = id as string;
+    const isCurrentConv = getCurrentConvId() === convId;
+
+    deleteLocalConv(convId);
+
+    if (isCurrentConv) {
+      setLocalMessages([]);
+      setCurrentLocalConvId(null);
+    }
+
+    refreshLocalConvList();
+  };
+
+  // 拖拽排序对话
+  const handleReorderConversations = useCallback((orderedIds: string[]) => {
+    const convs = getStoredConversations();
+    const orderedConvs: Record<string, any> = {};
+    orderedIds.forEach(id => {
+      if (convs[id]) {
+        orderedConvs[id] = convs[id];
+      }
+    });
+
+    try {
+      localStorage.setItem('chat_conversations', JSON.stringify(orderedConvs));
+      refreshLocalConvList();
+    } catch (error) {
+      console.error('[ChatPage] 保存对话排序失败:', error);
+    }
+  }, [refreshLocalConvList]);
+
+  // 同步后端 ID
+  useEffectHook(() => {
+    if (remoteConvId && currentLocalConvId) {
+      syncBackendId(currentLocalConvId, remoteConvId);
+    }
+  }, [remoteConvId, currentLocalConvId, syncBackendId]);
 
   const handleLogout = () => {
     logout();
@@ -124,150 +297,190 @@ export default function ChatPage() {
 
   const showAdminEntry = userRole === 'ADMIN';
 
-  // 构建完整的消息列表（包含正在流式输出的消息）
-  // 使用 useMemo 避免每次渲染都创建新数组
-  const displayMessages = useMemo<Message[]>(() => [
-    ...messages,
-    ...(currentStreamingMessage || currentStreamingReasoning
-      ? [{
-          role: 'assistant' as const,
+  // 统一数据源逻辑
+  const displayMessages = useMemo<Message[]>(() => {
+    const baseMessages = [...localMessages];
+
+    if (currentStreamingMessage || currentStreamingReasoning) {
+      const lastMsg = baseMessages[baseMessages.length - 1];
+      const hasStreamingAssistant = lastMsg && lastMsg.role === 'assistant' && isLoading;
+
+      if (hasStreamingAssistant) {
+        baseMessages[baseMessages.length - 1] = {
+          ...lastMsg,
+          content: currentStreamingMessage,
+          reasoning: currentStreamingReasoning || lastMsg.reasoning,
+        };
+      } else {
+        baseMessages.push({
+          role: 'assistant',
           content: currentStreamingMessage,
           reasoning: currentStreamingReasoning || undefined,
-        }]
-      : []),
-  ], [messages, currentStreamingMessage, currentStreamingReasoning]);
-
-  // ⚠️ 修复：只在消息完成时刷新会话列表，而不是每个 chunk 都请求
-  useEffectHook(() => {
-    if (messages.length > 0 && !isLoading) {
-      loadConversations();
+        });
+      }
     }
-  }, [messages.length]); // 只在消息数量变化时触发，而不是 currentStreamingMessage
+
+    return baseMessages;
+  }, [localMessages, currentStreamingMessage, currentStreamingReasoning, isLoading]);
+
+  // 智能滚动：检测用户是否手动滚动
+  useEffectHook(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      
+      // 如果滚动到底部附近，恢复自动滚动
+      shouldAutoScrollRef.current = isNearBottom;
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // 自动滚动到底部（仅在应该自动滚动时）
+  useEffectHook(() => {
+    if (shouldAutoScrollRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [displayMessages, currentStreamingMessage]);
+
+  const handleOpenAdmin = () => {
+    setShowAdminPanel(true);
+  };
+
+  const handleCloseAdmin = () => {
+    setShowAdminPanel(false);
+  };
+
+  // 管理员面板
+  if (showAdminPanel) {
+    return <AdminPanel onBack={handleCloseAdmin} />;
+  }
+
+  const hasMessages = displayMessages.length > 0;
+  const currentTitle = getCurrentConvId() 
+    ? localConversations.find(c => c.id === getCurrentConvId())?.title 
+    : null;
 
   return (
-    <div className="h-full flex bg-white dark:bg-gray-900">
+    <div className="h-screen flex bg-white dark:bg-gray-900">
       {/* 侧边栏 */}
       <Sidebar
-        conversations={conversations}
-        activeConversationId={conversationId}
-        onSelectConversation={handleSelectConversation}
-        onDeleteConversation={handleDeleteConversation}
+        localConversations={localConversations}
+        currentLocalConvId={currentLocalConvId}
+        onSelectLocalConversation={handleSelectConversation}
+        onDeleteLocalConversation={handleDeleteConversation}
+        onReorderConversations={handleReorderConversations}
         onNewConversation={handleNewConversation}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         username={username}
         showAdminEntry={showAdminEntry}
+        onOpenAdmin={handleOpenAdmin}
         onLogout={handleLogout}
+        canCreateConversation={!userDisabled}
+        onOpenAgentSettings={() => setShowAgentSettings(true)}
+        agentName={agentName}
       />
 
       {/* 主聊天区域 */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* 顶部导航栏 */}
-        <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-          {/* 移动端菜单按钮 */}
-          <button
-            onClick={() => setIsMobileSidebarOpen(true)}
-            className="lg:hidden p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-          >
-            <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
+        {/* 顶部导航栏（极简） */}
+        {hasMessages && (
+          <header className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
+            <div className="flex items-center gap-3">
+              {/* 移动端菜单按钮 */}
+              <button
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="lg:hidden p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
 
-          <div className="flex-1">
-            <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-              {conversationId ? `对话 #${conversationId}` : '新对话'}
-            </h1>
-            {isLoading && (
-              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-                AI 正在思考...
-              </p>
-            )}
-          </div>
+              <div>
+                <h1 className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate max-w-[200px]">
+                  {currentTitle || '新对话'}
+                </h1>
+                {isLoading && (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5 mt-0.5">
+                    <span className="inline-block w-1 h-1 bg-gray-400 rounded-full animate-pulse" />
+                    生成中...
+                  </p>
+                )}
+              </div>
+            </div>
 
-          {/* 清空对话按钮 */}
-          {messages.length > 0 && (
+            {/* 操作按钮 */}
             <button
-              onClick={handleClearMessages}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 dark:text-gray-400"
+              onClick={() => {
+                if (useLocalMode) {
+                  const convId = getCurrentConvId();
+                  if (convId) deleteLocalConv(convId);
+                } else {
+                  clearMessages();
+                }
+              }}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"
               title="清空对话"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
             </button>
-          )}
-        </header>
+          </header>
+        )}
 
         {/* 消息列表区域 */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin bg-white dark:bg-gray-900">
-          {displayMessages.length === 0 ? (
-            // 空状态
+        <div 
+          ref={chatContainerRef}
+          className="flex-1 overflow-y-auto scrollbar-thin bg-white dark:bg-gray-900"
+        >
+          {isSwitchingConversation ? (
+            <div className="max-w-3xl mx-auto px-4 py-12">
+              <MessageSkeleton count={3} />
+            </div>
+          ) : !hasMessages ? (
+            // 空状态（极简）
             <div className="h-full flex items-center justify-center">
-              <div className="text-center px-4">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
-                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                  </svg>
-                </div>
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                  有什么可以帮你的吗？
+              <div className="text-center px-4 max-w-lg">
+                <h2 className="text-2xl font-normal text-gray-900 dark:text-gray-100 mb-3">
+                  有什么可以帮你的？
                 </h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
-                  我可以帮你写代码、回答问题、提供建议，或者进行各种创意写作。
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-8">
+                  输入你的问题，开始对话
                 </p>
-                
-                {/* 快捷提示 */}
-                <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-md mx-auto">
-                  {[
-                    '解释 React Hooks',
-                    '帮我写一段 Python 代码',
-                    '如何提高代码质量？',
-                    'TailwindCSS 使用技巧',
-                  ].map((prompt) => (
-                    <button
-                      key={prompt}
-                      onClick={() => handleSend(prompt)}
-                      className="
-                        px-3 py-2 text-left
-                        bg-gray-50 dark:bg-gray-800
-                        border border-gray-200 dark:border-gray-700
-                        rounded-xl
-                        text-sm text-gray-700 dark:text-gray-300
-                        hover:bg-gray-100 dark:hover:bg-gray-700
-                        transition-colors duration-150
-                      "
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           ) : (
             // 消息列表
-            <div className="max-w-3xl mx-auto px-4 py-6">
+            <div className="pb-4">
               {displayMessages.map((msg, idx) => (
                 <MessageBubble
                   key={idx}
                   message={msg}
                   isStreaming={idx === displayMessages.length - 1 && isLoading}
+                  agentName={agentName}
                 />
               ))}
-              
-              {/* 加载指示器 */}
+
+              {/* 加载指示器（极简） */}
               {isLoading && currentStreamingMessage === '' && (
-                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                  <div className="flex gap-1">
-                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '200ms' }} />
-                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '400ms' }} />
+                <div className="max-w-3xl mx-auto px-4 py-6">
+                  <div className="flex items-center gap-2 text-sm text-gray-400 dark:text-gray-500">
+                    <div className="flex gap-1">
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '200ms' }} />
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '400ms' }} />
+                    </div>
                   </div>
-                  <span>正在生成回复...</span>
                 </div>
               )}
-              
+
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -275,13 +488,8 @@ export default function ChatPage() {
 
         {/* 错误提示 */}
         {error && (
-          <div className="mx-4 mb-2 px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
-            <div className="flex items-start gap-2">
-              <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
-            </div>
+          <div className="mx-4 mb-2 px-4 py-2.5 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-lg">
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           </div>
         )}
 
@@ -290,8 +498,55 @@ export default function ChatPage() {
           onSend={handleSend}
           isLoading={isLoading}
           onStop={abortStream}
+          disabled={userDisabled}
+          placeholder={hasMessages ? '回复...' : '输入你的问题...'}
+          autoFocus={!hasMessages}
         />
       </main>
+
+      {/* Agent 设置弹窗（极简） */}
+      {showAgentSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-sm mx-4">
+            <div className="p-5">
+              <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-4">Agent 名称</h2>
+              <input
+                type="text"
+                value={agentName}
+                onChange={(e) => {
+                  const newName = e.target.value.trim();
+                  setAgentName(newName || 'AI');
+                  localStorage.setItem('agent_name', newName || 'AI');
+                }}
+                maxLength={20}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600"
+                placeholder="输入名称"
+              />
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                此名称将显示在 AI 消息旁边
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-700">
+              <button
+                onClick={() => {
+                  setAgentName('AI');
+                  localStorage.setItem('agent_name', 'AI');
+                }}
+                className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+              >
+                重置
+              </button>
+              <button
+                onClick={() => setShowAgentSettings(false)}
+                className="px-4 py-2 text-sm text-white bg-gray-900 dark:bg-gray-100 hover:bg-gray-800 dark:hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

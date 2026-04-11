@@ -1,371 +1,84 @@
 # Agent 后端系统
 
-基于 Spring Boot 3.4.4 的 AI Agent 后端系统，提供用户管理、权限控制、对话管理和 AI Agent 调用功能。
+基于 Spring Boot 3.4.4 的 AI Agent 后端系统，提供用户管理、认证授权、SSE 流式对话和 AI Agent 调用功能。
+
+## 最近更新
+
+### 2026-04-10
+- ✅ **逻辑删除优化**：MyBatis-Plus 自动过滤已删除数据
+- ✅ **性能优化**：批量查询避免 N+1 问题（IO 次数降低 80%+）
+- ✅ **Abort 清理**：智能清理机制，新建会话 abort 时自动删除空会话
+- ✅ **DTO 设计**：MessageDTO/ConversationDTO/UserDTO 提升安全性和性能
+- ✅ **安全性提升**：用户接口返回 DTO 隐藏密码字段
 
 ## 技术栈
 
-- **Spring Boot 3.4.4** - 核心框架
+- **Spring Boot 3.4.4** + **Java 21**
 - **Spring Security + JWT** - 认证授权
-- **MyBatis-Plus 3.5.9** - ORM 框架
-- **MySQL 8.0** - 关系型数据库
-- **Redis** - 缓存
-- **Lombok** - 代码生成
-- **Spring Retry** - 重试机制
+- **MyBatis-Plus 3.5.14** - ORM
+- **MySQL 8.0** - 数据库
+- **Redis** - 缓存 + SSE 流式存储
+- **Spring WebFlux** - SSE 流式处理
 
 ## 项目结构
 
 ```
 java-backend/
-├── pom.xml
-├── sql/
-│   └── init.sql                      # 数据库初始化脚本
-└── src/main/
-    ├── java/com/caius/agent/
-    │   ├── AgentApplication.java     # 启动类
-    │   ├── common/                   # 通用模块
-    │   │   ├── config/               # 配置类
-    │   │   │   ├── MybatisPlusConfig.java
-    │   │   │   ├── RedisConfig.java
-    │   │   │   ├── RestTemplateConfig.java
-    │   │   │   └── SecurityConfig.java
-    │   │   ├── exception/            # 异常处理
-    │   │   │   ├── BusinessException.java
-    │   │   │   └── GlobalExceptionHandler.java
-    │   │   ├── result/               # 统一返回
-    │   │   │   └── Result.java
-    │   │   └── util/                 # 工具类
-    │   │       └── JwtUtil.java
-    │   ├── module/                   # 业务模块
-    │   │   ├── agent/                # Agent 模块
-    │   │   │   ├── controller/
-    │   │   │   │   └── AgentController.java
-    │   │   │   ├── dto/
-    │   │   │   │   ├── ChatRequest.java
-    │   │   │   │   └── ChatResponse.java
-    │   │   │   └── service/
-    │   │   │       ├── AgentService.java
-    │   │   │       └── impl/AgentServiceImpl.java
-    │   │   ├── auth/                 # 认证模块
-    │   │   │   ├── controller/
-    │   │   │   │   └── AuthController.java
-    │   │   │   ├── dto/
-    │   │   │   │   ├── LoginRequest.java
-    │   │   │   │   └── RegisterRequest.java
-    │   │   │   ├── filter/
-    │   │   │   │   └── JwtAuthenticationFilter.java
-    │   │   │   └── service/
-    │   │   │       ├── AuthService.java
-    │   │   │       └── impl/AuthServiceImpl.java
-    │   │   ├── conversation/         # 会话模块
-    │   │   │   ├── controller/
-    │   │   │   │   └── ConversationController.java
-    │   │   │   ├── entity/
-    │   │   │   │   ├── Conversation.java
-    │   │   │   │   └── Message.java
-    │   │   │   └── service/
-    │   │   │       ├── ConversationService.java
-    │   │   │       └── impl/ConversationServiceImpl.java
-    │   │   ├── gateway/              # Gateway 模块
-    │   │   │   └── PythonAgentGateway.java
-    │   │   └── user/                 # 用户模块
-    │   │       ├── controller/
-    │   │       │   └── UserController.java
-    │   │       ├── entity/
-    │   │       │   └── User.java
-    │   │       └── service/
-    │   │           ├── UserService.java
-    │   │           └── impl/UserServiceImpl.java
-    │   └── dao/                      # 数据访问层
-    │       ├── ConversationMapper.java
-    │       ├── MessageMapper.java
-    │       └── UserMapper.java
-    └── resources/
-        ├── application.yml
-        └── application-dev.yml
+├── src/main/java/com/caius/agent/
+│   ├── AgentApplication.java
+│   ├── common/                   # 通用模块
+│   │   ├── config/               # 配置类
+│   │   ├── exception/            # 异常处理
+│   │   ├── result/               # 统一返回
+│   │   └── util/                 # 工具类
+│   ├── module/                   # 业务模块
+│   │   ├── agent/                # Agent 流式对话
+│   │   │   ├── config/           # AbortManager
+│   │   │   ├── controller/       # StreamChatController
+│   │   │   ├── service/          # StreamChatService
+│   │   │   ├── dto/              # 请求/响应 DTO
+│   │   │   └── model/            # SseEvent
+│   │   ├── auth/                 # 认证模块
+│   │   ├── admin/                # 管理员模块
+│   │   ├── conversation/         # 会话模块
+│   │   ├── user/                 # 用户模块
+│   │   └── gateway/              # Python Agent 网关
+│   └── dao/                      # MyBatis Mapper
+├── src/main/resources/
+│   ├── application.yml
+│   ├── application-dev.yml
+│   └── application-prod.yml
+├── sql/                          # 数据库脚本
+├── docs/                         # 文档
+│   └── SSE_ABORT_GUIDE.md       # 前端对接指南
+└── api.md                        # API 接口文档
 ```
 
-## 数据库设计
+## 核心功能
 
-### 用户表 (user)
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | BIGINT | 用户ID |
-| username | VARCHAR(50) | 用户名 |
-| email | VARCHAR(100) | 邮箱 |
-| password | VARCHAR(255) | 密码（BCrypt加密） |
-| role | VARCHAR(20) | 角色（USER/ADMIN） |
-| status | TINYINT | 状态（0-禁用，1-启用） |
-| deleted | TINYINT | 逻辑删除 |
-| created_at | DATETIME | 创建时间 |
-| updated_at | DATETIME | 更新时间 |
+### 1. 认证授权
+- 用户注册/登录
+- JWT Token 生成/验证
+- 角色权限控制（USER/ADMIN）
 
-### 会话表 (conversation)
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | BIGINT | 会话ID |
-| user_id | BIGINT | 用户ID |
-| title | VARCHAR(200) | 会话标题 |
-| deleted | TINYINT | 逻辑删除 |
-| created_at | DATETIME | 创建时间 |
-| updated_at | DATETIME | 更新时间 |
+### 2. SSE 流式对话
+- 实时流式输出 AI 回复
+- Abort 中断机制（智能清理）
+- 断线恢复
+- Redis Stream 存储优化
 
-### 消息表 (message)
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | BIGINT | 消息ID |
-| conversation_id | BIGINT | 会话ID |
-| user_id | BIGINT | 用户ID |
-| role | VARCHAR(20) | 角色（user/assistant） |
-| content | TEXT | 消息内容 |
-| deleted | TINYINT | 逻辑删除 |
-| created_at | DATETIME | 创建时间 |
-| updated_at | DATETIME | 更新时间 |
+### 3. 会话管理
+- 创建/查询/删除会话
+- 消息历史记录（批量查询优化）
+- 最新消息预览
 
-## API 接口
+### 4. 管理员功能
+- 用户列表（分页+搜索+筛选）
+- 用户 CRUD（逻辑删除）
+- 状态管理（启用/禁用）
 
-### 认证接口
-
-#### POST /auth/register
-注册新用户
-
-**请求体：**
-```json
-{
-  "username": "testuser",
-  "email": "test@example.com",
-  "password": "123456"
-}
-```
-
-#### POST /auth/login
-用户登录获取 Token
-
-**请求体：**
-```json
-{
-  "username": "testuser",
-  "password": "123456"
-}
-```
-
-**响应：**
-```json
-{
-  "code": 200,
-  "message": "登录成功",
-  "data": {
-    "token": "eyJhbGciOiJIUzI1NiJ9...",
-    "userId": 1,
-    "username": "testuser",
-    "role": "USER"
-  }
-}
-```
-
-### Agent 接口
-
-#### POST /agent/chat
-发送消息给 AI Agent
-
-**请求头：**
-```
-Authorization: Bearer {token}
-```
-
-**请求体：**
-```json
-{
-  "message": "你好，AI助手",
-  "conversationId": 1  // 可选，不传则创建新会话
-}
-```
-
-**响应：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": {
-    "reply": "你好！我是AI助手，有什么可以帮助你的吗？",
-    "conversationId": 1
-  }
-}
-```
-
-### 会话接口
-
-#### GET /conversation/list
-获取用户会话列表
-
-**请求头：**
-```
-Authorization: Bearer {token}
-```
-
-#### GET /conversation/{id}/messages
-获取会话消息列表
-
-**请求头：**
-```
-Authorization: Bearer {token}
-```
-
-#### DELETE /conversation/{id}
-删除会话
-
-**请求头：**
-```
-Authorization: Bearer {token}
-```
-
-### 用户接口
-
-#### GET /user/{id}
-获取用户信息
-
-**请求头：**
-```
-Authorization: Bearer {token}
-```
-
-#### PUT /user/{id}
-更新用户信息（仅管理员或用户本人）
-
-**请求头：**
-```
-Authorization: Bearer {token}
-```
-
-### Admin 用户管理接口
-
-> 注意：以下接口目前用于开发测试，生产环境需启用 JWT 认证
-
-#### GET /api/admin/users
-获取用户列表（分页+筛选）
-
-**请求参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|-----|------|-----|------|
-| page | number | 否 | 页码（默认 1） |
-| pageSize | number | 否 | 每页数量（默认 10，最大 100） |
-| keyword | string | 否 | 搜索关键词（匹配用户名或邮箱） |
-| role | string | 否 | 角色筛选：`ADMIN` 或 `USER` |
-| status | string | 否 | 状态筛选：`ACTIVE` 或 `DISABLED` |
-
-**响应：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": {
-    "list": [
-      {
-        "id": 1,
-        "username": "admin",
-        "email": "admin@example.com",
-        "role": "ADMIN",
-        "status": "ACTIVE",
-        "createdAt": "2024-01-15T10:30:00Z"
-      }
-    ],
-    "total": 100,
-    "page": 1,
-    "pageSize": 10
-  }
-}
-```
-
-#### POST /api/admin/users
-创建用户
-
-**请求体：**
-```json
-{
-  "username": "新用户名",
-  "email": "user@example.com",
-  "password": "密码（至少6位）",
-  "role": "USER",
-  "status": "ACTIVE"
-}
-```
-
-**响应：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": {
-    "id": 13,
-    "username": "新用户名",
-    "email": "user@example.com",
-    "role": "USER",
-    "status": "ACTIVE",
-    "createdAt": "2024-07-20T10:00:00Z"
-  }
-}
-```
-
-#### PUT /api/admin/users/{id}
-更新用户
-
-**请求体：**
-```json
-{
-  "username": "更新后的用户名",
-  "email": "updated@example.com",
-  "password": "新密码（可选，留空则不修改）",
-  "role": "ADMIN",
-  "status": "ACTIVE"
-}
-```
-
-**响应：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": {
-    "id": 1,
-    "username": "更新后的用户名",
-    "email": "updated@example.com",
-    "role": "ADMIN",
-    "status": "ACTIVE",
-    "createdAt": "2024-01-15T10:30:00Z"
-  }
-}
-```
-
-#### DELETE /api/admin/users/{id}
-删除用户（逻辑删除）
-
-**响应：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": null
-}
-```
-
-#### PATCH /api/admin/users/{id}/toggle-status
-切换用户状态（ACTIVE <-> DISABLED）
-
-**响应：**
-```json
-{
-  "code": 200,
-  "message": "操作成功",
-  "data": {
-    "id": 1,
-    "username": "用户名",
-    "email": "user@example.com",
-    "role": "USER",
-    "status": "DISABLED",
-    "createdAt": "2024-01-15T10:30:00Z"
-  }
-}
-```
+### 5. 用户功能
+- 查看/更新用户信息（DTO 转换，隐藏密码）
 
 ## 快速开始
 
@@ -382,54 +95,191 @@ mysql -u root -p < sql/init.sql
 
 ### 2. 修改配置
 编辑 `src/main/resources/application-dev.yml`：
-- 修改 MySQL 连接信息
-- 修改 Redis 连接信息
-- 修改 Python Agent 服务地址
+- MySQL 连接信息
+- Redis 连接信息
+- Python Agent 服务地址
 
 ### 3. 启动项目
+```bash
+mvn spring-boot:run
+```
+
+或打包运行：
 ```bash
 mvn clean package -DskipTests
 java -jar target/java-backend-0.0.1-SNAPSHOT.jar
 ```
 
-或使用 Maven 插件：
-```bash
-mvn spring-boot:run
+### 4. 测试账号
+- 管理员：`admin / admin123`
+- 普通用户：`user / admin123`
+
+## API 接口
+
+### 认证接口
+- `POST /auth/register` - 用户注册
+- `POST /auth/login` - 用户登录
+
+### 用户接口
+- `GET /user/{id}` - 获取用户信息（返回 DTO，不含密码）
+- `PUT /user/{id}` - 更新用户信息
+
+### SSE 流式对话
+- `POST /agent/chat/stream` - 流式对话
+- `POST /agent/chat/stream/abort` - 中断流式生成
+- `POST /api/v1/chat/{conversationId}/abort` - 中断流式生成（RESTful）
+- `GET /agent/chat/stream/recover` - 断线恢复
+
+### 会话管理
+- `GET /conversation/list` - 获取会话列表（含最新消息预览）
+- `GET /conversation/{id}/messages` - 获取消息列表（含用户名）
+- `DELETE /conversation/{id}` - 删除会话（逻辑删除）
+
+### 管理员接口
+- `GET /api/admin/users` - 获取用户列表
+- `POST /api/admin/users` - 创建用户
+- `PUT /api/admin/users/{id}` - 更新用户
+- `DELETE /api/admin/users/{id}` - 删除用户（逻辑删除）
+- `PATCH /api/admin/users/{id}/toggle-status` - 切换用户状态
+
+**详细 API 文档：** 查看 [api.md](api.md)
+
+## 前端对接
+
+**前端 API 对接文档：** 查看 [docs/frontend-api.md](docs/frontend-api.md)
+
+该文档包含：
+- 📋 所有接口的 TypeScript 类型定义
+- 🔄 数据结构变更 说明（2026-04-10 更新）
+- 💻 完整的前端使用示例
+- 📝 迁移指南（从旧版本升级）
+- ❓ 常见问题解答
+
+## SSE 流式对接
+
+### 前端快速上手
+
+```typescript
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+
+let messageId = null;
+
+fetchEventSource('/agent/chat/stream', {
+  method: 'POST',
+  body: JSON.stringify({ message: '你好' }),
+  onmessage(event) {
+    const data = JSON.parse(event.data);
+    
+    if (data.type === 'done') {
+      messageId = data.messageId; // 保存用于 abort
+    }
+  },
+});
+
+// 用户点击停止按钮
+async function stopGeneration() {
+  await fetch('/agent/chat/stream/abort', {
+    method: 'POST',
+    body: JSON.stringify({ messageId }),
+  });
+}
 ```
 
-### 4. 测试账号
-- 管理员：admin / admin123
-- 普通用户：user / admin123
+**详细对接指南：** 查看 [docs/SSE_ABORT_GUIDE.md](docs/SSE_ABORT_GUIDE.md)
+
+## Abort 机制
+
+### 工作流程
+```
+用户发送消息 → 后端生成 messageId → SSE 推送 chunk →
+done 事件返回 messageId → 用户点击停止 → 调用 abort 接口 →
+后端中断流式生成 → 智能清理资源
+```
+
+### 核心特性
+- ✅ 双重中断（前端 HTTP 中断 + 后端任务中断）
+- ✅ 智能清理（防止内存泄漏）
+  - 新建会话 + abort → 删除空会话
+  - 已有会话 + abort → 保留会话
+- ✅ 线程安全（ConcurrentHashMap + AtomicBoolean）
+- ✅ 任务超时（默认 10 分钟）
+- ✅ Redis Stream 优化（MAXLEN ~ 1000 + TTL）
+
+### 清理策略
+
+| 场景 | 清理内容 |
+|------|----------|
+| 新建会话 + abort | ✅ 删除 Redis 数据<br>✅ 删除用户消息<br>✅ 删除空会话 |
+| 已有会话 + abort | ✅ 删除 Redis 数据<br>✅ 删除用户消息<br>✅ 保留会话 |
+| 正常完成 | ✅ 保留所有数据 |
+
+## 性能优化
+
+### 批量查询优化
+- ✅ **消息列表**：批量获取用户信息（避免 N+1 查询）
+  - 优化前：10 条消息 = 11 次数据库查询
+  - 优化后：10 条消息 = 2 次数据库查询
+- ✅ **会话列表**：批量获取最新消息预览
+  - 优化前：10 个会话 = 11 次数据库查询
+  - 优化后：10 个会话 = 2 次数据库查询
+
+### DTO 设计
+- ✅ **MessageDTO**：包含用户名，避免前端额外请求
+- ✅ **ConversationDTO**：包含最新消息预览
+- ✅ **UserDTO**：隐藏密码等敏感信息
+
+### 逻辑删除
+- ✅ 使用 MyBatis-Plus `@TableLogic` 自动过滤
+- ✅ 用户列表/会话列表/消息列表自动排除已删除数据
 
 ## Python Agent 对接
 
 系统通过 HTTP POST 调用 Python Agent 服务：
 
-**请求格式：**
-```
-POST {python-agent.url}{python-agent.chat-endpoint}
-Content-Type: application/json
-
-{
-  "message": "带上下文的完整对话",
-  "session_id": "会话ID"
-}
-```
-
-**响应格式：**
-```json
-{
-  "reply": "AI 回复内容"
-}
-```
-
-配置项：
 ```yaml
 python-agent:
-  url: http://localhost:5000
-  chat-endpoint: /api/chat
+  url: http://localhost:5001
+  stream-endpoint: /api/v1/chat/stream
   timeout: 30000
-  retry:
-    max-attempts: 3
-    delay: 1000
+  stream-timeout: 120000
 ```
+
+## 配置说明
+
+### 流式服务配置
+```yaml
+streaming:
+  max-concurrent: 1000          # 最大并发流（全局）
+  per-user-limit: 5             # 单用户最大流数
+  max-chunks-per-message: 5000  # 单条消息最大 chunk
+  chunk-ttl: 3600               # Redis chunk TTL（秒）
+```
+
+## 数据库设计
+
+### 主要表结构
+- **user** - 用户表（id, username, email, password, role, status, **deleted**）
+- **conversation** - 会话表（id, user_id, title, **deleted**）
+- **message** - 消息表（id, conversation_id, user_id, role, content, title, **deleted**）
+
+> 注：所有表都包含 `deleted` 字段用于逻辑删除（0=未删除，1=已删除）
+
+## 测试
+
+```bash
+# 运行所有测试
+mvn test
+
+# 测试 Abort 功能
+./test-abort.sh
+```
+
+## 开发工具
+
+- **IDEA** - 推荐 IDE
+- **Lombok 插件** - 必需
+- **Postman/Insomnia** - API 测试
+
+## 许可证
+
+MIT License

@@ -1,7 +1,9 @@
+
 """Java 后端客户端实现"""
-import httpx
 import logging
-from typing import List
+
+import httpx
+
 from ...domain.entities import Message
 from ...domain.protocols import ConversationRepository
 
@@ -22,7 +24,7 @@ class JavaBackendClient(ConversationRepository):
         self,
         conversation_id: int,
         token: str,
-    ) -> List[Message]:
+    ) -> list[Message]:
         """获取会话历史消息"""
         # 跳过条件：conversation_id 为 0 或 token 为空
         if conversation_id == 0 or not token:

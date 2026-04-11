@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useDebounce } from '../hooks/useDebounce';
 import Table from '../components/Table';
 import Button from '../components/Button';
 import Input from '../components/Input';
@@ -44,6 +45,7 @@ const AdminUserManagement: React.FC = () => {
   
   // 筛选状态
   const [keyword, setKeyword] = useState('');
+  const debouncedKeyword = useDebounce(keyword, 400); // 400ms 防抖
   const [filterRole, setFilterRole] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
   
@@ -69,28 +71,33 @@ const AdminUserManagement: React.FC = () => {
       const params: UserListParams = {
         page,
         pageSize,
-        keyword: keyword || undefined,
+        keyword: debouncedKeyword || undefined,
         role: (filterRole as 'ADMIN' | 'USER') || undefined,
         status: (filterStatus as 'ACTIVE' | 'DISABLED') || undefined,
       };
 
       const response = await getUserList(params);
       if (response.code === 200) {
-        setUsers(response.data.list);
-        setTotal(response.data.total);
+        const list = response.data.list || response.data || [];
+        setUsers(list);
+        // 优先使用 total，其次使用 list 长度
+        const totalCount = response.data.total ?? list.length;
+        setTotal(totalCount);
+      } else {
+        setMessage({ type: 'error', text: response.message || '加载失败' });
       }
-    } catch (error: any) {
-      const errorMsg = error?.message || '加载用户列表失败';
-      showMessage('error', errorMsg.replace(/^Error: /, ''));
+    } catch (err: any) {
+      const errorMsg = err?.message || '加载用户列表失败';
+      setMessage({ type: 'error', text: errorMsg });
     } finally {
       setLoading(false);
     }
   };
-  
+
   useEffect(() => {
     loadUsers();
-  }, [page, pageSize, keyword, filterRole, filterStatus]);
-  
+  }, [page, pageSize, debouncedKeyword, filterRole, filterStatus]);
+
   // 显示消息
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });

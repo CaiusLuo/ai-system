@@ -9,17 +9,24 @@ Job Agent API - FastAPI 应用入口
 - core/:         核心层（配置/异常/中间件/日志）
 - schemas/:      数据模型层
 - prompts/:      Prompt 配置层
+
+对齐对接文档：
+- SSE 流式对话：POST /api/v1/chat/stream
+- 中断流式生成：POST /api/v1/chat/stream/abort
+- 健康检查：GET /api/v1/health
 """
 from contextlib import asynccontextmanager
 from typing import Optional
+import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 
 from agent.core.config import settings
 from agent.core.logging import setup_logging
-from agent.core.middleware import RequestLoggingMiddleware
-from agent.core.exceptions import AgentException
+from agent.core.middleware import RequestLoggingMiddleware, setup_cors
+from agent.core.exceptions import AgentException, LLMServiceError, ExternalServiceError
+from agent.core.abort import AbortController
 
 from agent.infrastructure.llm.deepseek_service import DeepSeekService
 from agent.infrastructure.external.java_backend_client import JavaBackendClient
@@ -33,6 +40,7 @@ class AppState:
 
     def __init__(self):
         self.agent_graph: Optional[JobAgentGraph] = None
+        self.abort_controller: Optional[AbortController] = None
 
 
 app_state = AppState()
@@ -42,6 +50,9 @@ app_state = AppState()
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     setup_logging()
+
+    # 初始化 Abort 控制器
+    app_state.abort_controller = AbortController()
 
     # 初始化基础设施
     java_client = JavaBackendClient(
@@ -54,15 +65,22 @@ async def lifespan(app: FastAPI):
         base_url=settings.deepseek_base_url,
         model=settings.deepseek_model,
         temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
+        timeout=settings.llm_timeout,
     )
 
     # 注入依赖，构建 Agent 图
     app_state.agent_graph = JobAgentGraph(
         repository=java_client,
         llm_gateway=llm_service,
+        abort_controller=app_state.abort_controller,
     )
 
     yield
+
+    # 清理资源（预留）
+    logger = logging.getLogger(__name__)
+    logger.info("应用关闭，资源清理完成")
 
 
 def create_app() -> FastAPI:
@@ -75,7 +93,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    # 注册中间件
+    # 注册 CORS 中间件
+    setup_cors(app, allow_origins=settings.get_cors_origins())
+
+    # 注册请求日志中间件
     app.add_middleware(RequestLoggingMiddleware)
 
     # 注册全局异常处理器
@@ -85,16 +106,49 @@ def create_app() -> FastAPI:
     ):
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": exc.message, "detail": exc.detail},
+            content=exc.to_dict(),
+        )
+
+    @app.exception_handler(LLMServiceError)
+    async def llm_service_error_handler(
+        request: Request, exc: LLMServiceError
+    ):
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error_code": "LLM_SERVICE_ERROR",
+                "message": "AI 服务暂时不可用，请稍后重试",
+                "detail": str(exc.detail) if exc.detail else None,
+            },
+        )
+
+    @app.exception_handler(ExternalServiceError)
+    async def external_service_error_handler(
+        request: Request, exc: ExternalServiceError
+    ):
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error_code": "EXTERNAL_SERVICE_ERROR",
+                "message": "外部服务调用失败",
+                "detail": str(exc.detail) if exc.detail else None,
+            },
         )
 
     @app.exception_handler(Exception)
     async def global_exception_handler(
         request: Request, exc: Exception
     ):
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"未处理的异常: {exc}", exc_info=True)
         return JSONResponse(
             status_code=500,
-            content={"error": "服务器内部错误", "detail": str(exc)},
+            content={
+                "error_code": "INTERNAL_ERROR",
+                "message": "服务器内部错误",
+                "detail": str(exc) if settings.debug else None,
+            },
         )
 
     # 注册路由
@@ -110,8 +164,8 @@ app = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=5001,
+        host=settings.host,
+        port=settings.port,
         reload=settings.debug,
+        log_level="info",
     )
-

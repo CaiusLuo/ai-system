@@ -24,7 +24,7 @@ export default function AuthPage() {
       if (mode === 'login') {
         const response = await login({ username, password });
         if (response.code === 200) {
-          navigate('/');
+          navigate('/chat');
         } else {
           setError(response.message || '登录失败');
         }

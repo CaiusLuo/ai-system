@@ -1,13 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { createSSEConnection, SSEHandlers, SEDoneData, SEEErrorData } from '../services/sse';
-import { getConversationMessages, Message as ConversationMessage } from '../services/conversation';
+import { abortStreamGeneration } from '../services/sseAbort';
+import { getConversationMessages } from '../services/conversation';
+import { Message, MessageDTO } from '../types';
 
-export interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  reasoning?: string; // 思考过程内容
-}
+export type { Message };
 
 interface UseSSEChatReturn {
   messages: Message[];
@@ -16,6 +14,7 @@ interface UseSSEChatReturn {
   isLoading: boolean;
   error: string | null;
   conversationId: number | null; // 当前会话 ID
+  messageId: string | null; // 当前消息 ID（用于 abort）
   sendMessage: (message: string, conversationId?: number) => void;
   abortStream: () => void;
   clearMessages: () => void;
@@ -34,8 +33,10 @@ export function useSSEChat(): UseSSEChatReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const [messageId, setMessageId] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const messageIdRef = useRef<string | null>(null); // 存储当前 messageId
   const streamingBufferRef = useRef('');
   const streamingReasoningBufferRef = useRef('');
 
@@ -62,6 +63,8 @@ export function useSSEChat(): UseSSEChatReturn {
     setError(null);
     setCurrentStreamingMessage('');
     streamingBufferRef.current = '';
+    setMessageId(null);
+    messageIdRef.current = null;
 
     // 添加用户消息
     const userMessage: Message = { role: 'user', content: message.trim() };
@@ -72,6 +75,15 @@ export function useSSEChat(): UseSSEChatReturn {
 
     // 创建 SSE 处理器
     const handlers: SSEHandlers = {
+      onMessageId: (newMessageId: string) => {
+        // 保存 messageId（只在首次设置）
+        if (!messageIdRef.current) {
+          messageIdRef.current = newMessageId;
+          setMessageId(newMessageId);
+          console.debug('[SSE] Received messageId:', newMessageId);
+        }
+      },
+
       onChunk: (content: string, _index: number) => {
         // 累加 chunk 内容
         streamingBufferRef.current += content;
@@ -149,7 +161,31 @@ export function useSSEChat(): UseSSEChatReturn {
   }, [isLoading, closeConnection]);
 
   // 中止当前的流式输出
-  const abortStream = useCallback(() => {
+  const abortStream = useCallback(async () => {
+    const currentMessageId = messageIdRef.current;
+    
+    // 1. 先中断 HTTP 连接
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      console.debug('[Abort] HTTP connection aborted');
+    }
+
+    // 2. 调用后端 abort 接口（确保后端也停止处理）
+    if (currentMessageId) {
+      try {
+        const success = await abortStreamGeneration(currentMessageId);
+        if (success) {
+          console.debug('[Abort] Backend stream generation stopped');
+        } else {
+          console.warn('[Abort] Backend task may have already ended');
+        }
+      } catch (error) {
+        console.error('[Abort] Failed to call backend abort API:', error);
+      }
+    } else {
+      console.warn('[Abort] Missing messageId, cannot call backend abort API');
+    }
+
     // 将当前已接收的内容添加到消息列表
     if (streamingBufferRef.current || streamingReasoningBufferRef.current) {
       const assistantMessage: Message = {
@@ -166,8 +202,9 @@ export function useSSEChat(): UseSSEChatReturn {
     streamingReasoningBufferRef.current = '';
     setIsLoading(false);
     setError(null);
-    closeConnection();
-  }, [closeConnection]);
+    messageIdRef.current = null;
+    setMessageId(null);
+  }, []);
 
   // 清空所有消息
   const clearMessages = useCallback(() => {
@@ -187,15 +224,22 @@ export function useSSEChat(): UseSSEChatReturn {
     try {
       const response = await getConversationMessages(id);
       if (response.code === 200 && response.data) {
-        const msgs: Message[] = response.data.map((msg: ConversationMessage) => ({
-          role: msg.role,
+        // 将后端返回的 MessageDTO 转换为前端 Message 格式
+        const msgs: Message[] = response.data.map((msg: MessageDTO) => ({
+          id: msg.id,
+          conversationId: msg.conversationId,
+          userId: msg.userId,
+          username: msg.username,
+          role: msg.role as 'user' | 'assistant',
           content: msg.content,
+          title: msg.title,
+          createdAt: msg.createdAt,
+          updatedAt: msg.updatedAt,
         }));
         setMessages(msgs);
         setConversationId(id);
       }
     } catch (err) {
-      console.error('[Chat] Failed to load conversation:', err);
       setError('加载会话失败');
     }
   }, []);
@@ -214,6 +258,7 @@ export function useSSEChat(): UseSSEChatReturn {
     isLoading,
     error,
     conversationId,
+    messageId,
     sendMessage,
     abortStream,
     clearMessages,

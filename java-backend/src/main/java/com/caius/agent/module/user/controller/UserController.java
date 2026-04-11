@@ -1,6 +1,7 @@
 package com.caius.agent.module.user.controller;
 
 import com.caius.agent.common.result.Result;
+import com.caius.agent.module.user.dto.UserDTO;
 import com.caius.agent.module.user.entity.User;
 import com.caius.agent.module.user.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -18,8 +19,8 @@ public class UserController {
     private final UserService userService;
 
     @GetMapping("/{id}")
-    public Result<User> getUserById(@PathVariable Long id) {
-        User user = userService.getUserById(id);
+    public Result<UserDTO> getUserById(@PathVariable Long id) {
+        UserDTO user = userService.getUserById(id);
         return Result.success(user);
     }
 

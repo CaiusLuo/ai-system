@@ -1,5 +1,6 @@
+
 """领域实体"""
-from typing import TypedDict, List, Optional
+from typing import List, TypedDict
 
 
 class Message(TypedDict):

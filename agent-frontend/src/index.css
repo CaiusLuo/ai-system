@@ -6,11 +6,14 @@
   * {
     @apply box-border;
   }
-  
+
   html, body, #root {
     @apply h-full m-0 p-0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Helvetica Neue", Arial, sans-serif;
   }
-  
+
   body {
     @apply font-sans antialiased bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100;
   }
@@ -20,16 +23,159 @@
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
   }
-  
+
   .scrollbar-thin::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
-  
+
   .scrollbar-thin::-webkit-scrollbar-thumb {
     @apply bg-gray-300 dark:bg-gray-600 rounded-full;
   }
-  
+
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     @apply bg-gray-400 dark:bg-gray-500;
   }
+}
+
+/* Markdown 渲染样式 */
+.markdown-body {
+  @apply text-sm leading-relaxed;
+}
+
+.markdown-body p {
+  @apply my-1.5 last:mb-0;
+}
+
+.markdown-body h1 {
+  @apply text-lg font-bold my-2;
+}
+
+.markdown-body h2 {
+  @apply text-base font-bold my-1.5;
+}
+
+.markdown-body h3 {
+  @apply text-sm font-semibold my-1;
+}
+
+.markdown-body ul {
+  @apply list-disc list-outside ml-4 my-1.5 space-y-0.5;
+}
+
+.markdown-body ol {
+  @apply list-decimal list-outside ml-4 my-1.5 space-y-0.5;
+}
+
+.markdown-body li {
+  @apply my-0.5;
+}
+
+.markdown-body a {
+  @apply text-blue-600 dark:text-blue-400 hover:underline;
+}
+
+.markdown-body blockquote {
+  @apply border-l-4 border-gray-300 dark:border-gray-600 pl-3 italic text-gray-600 dark:text-gray-400 my-1.5;
+}
+
+.markdown-body code {
+  @apply px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs font-mono;
+}
+
+.markdown-body pre {
+  @apply my-2 rounded-lg overflow-hidden;
+}
+
+.markdown-body pre code {
+  @apply block p-3 bg-gray-800 dark:bg-gray-900 rounded-lg text-xs font-mono overflow-x-auto;
+}
+
+.markdown-body table {
+  @apply min-w-full divide-y divide-gray-300 dark:divide-gray-600 text-xs my-2;
+}
+
+.markdown-body th {
+  @apply px-2 py-1 bg-gray-100 dark:bg-gray-700 font-semibold text-left;
+}
+
+.markdown-body td {
+  @apply px-2 py-1 border-t border-gray-200 dark:border-gray-600;
+}
+
+.markdown-body hr {
+  @apply my-2 border-gray-300 dark:border-gray-600;
+}
+
+.markdown-body img {
+  @apply max-w-full h-auto my-2 rounded;
+}
+
+/* 页面切换动画 */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOutLeft {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 骨架屏动画 */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.dark .skeleton {
+  background: linear-gradient(90deg, #2d2d2d 25%, #3d3d3d 50%, #2d2d2d 75%);
+  background-size: 200% 100%;
+}
+
+/* 打字机光标动画 */
+@keyframes typing {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }

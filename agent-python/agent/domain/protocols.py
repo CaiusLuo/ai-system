@@ -1,5 +1,8 @@
+
 """领域协议 - 定义服务契约，实现依赖倒置"""
-from typing import List, Protocol, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import List, Protocol
+
 from .entities import Message
 
 

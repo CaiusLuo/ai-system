@@ -20,6 +20,12 @@ import java.util.List;
 
 /**
  * JWT 认证过滤器
+ * 
+ * 职责：
+ * 1. 从请求头提取 JWT Token
+ * 2. 验证 Token 有效性
+ * 3. 解析用户信息并设置到 SecurityContext
+ * 4. 转换角色格式：数据库 "ADMIN" → Spring Security "ROLE_ADMIN"
  */
 @Slf4j
 @Component
@@ -42,14 +48,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String username = jwtUtil.getUsername(token);
             String role = jwtUtil.getRole(token);
 
+            // ⭐ 角色格式转换：数据库 "ADMIN" → Spring Security "ROLE_ADMIN"
+            // Spring Security 的 hasRole("ADMIN") 实际检查的是 "ROLE_ADMIN"
+            String authority = "ROLE_" + role;
             List<SimpleGrantedAuthority> authorities = List.of(
-                    new SimpleGrantedAuthority("ROLE_" + role)
+                    new SimpleGrantedAuthority(authority)
             );
 
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(userId, null, authorities);
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
+            
+            log.debug("[JWT] 认证成功, userId={}, username={}, role={}, authority={}", 
+                    userId, username, role, authority);
+        } else if (StringUtils.hasText(token)) {
+            log.warn("[JWT] Token 验证失败, URI={}", request.getRequestURI());
         }
 
         filterChain.doFilter(request, response);

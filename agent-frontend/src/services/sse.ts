@@ -1,28 +1,7 @@
 import { getToken } from './auth';
+import { SSEChunkData, SEDoneData, SEEErrorData, SEPingData } from '../types';
 
-// SSE 事件类型定义
-export interface SSEChunkData {
-  type: 'chunk';
-  content: string;
-  index: number;
-  reasoning?: string; // 思考过程内容
-  info?: string; // 额外信息（别名）
-  conversationId?: number; // 首次响应可能包含 conversationId
-}
-
-export interface SEDoneData {
-  type: 'done';
-  total_tokens: number;
-}
-
-export interface SEEErrorData {
-  type: 'error';
-  message: string;
-}
-
-export interface SEPingData {
-  type: 'ping';
-}
+export type { SSEChunkData, SEDoneData, SEEErrorData, SEPingData };
 
 export type SSEEventData = SSEChunkData | SEDoneData | SEEErrorData | SEPingData;
 
@@ -33,6 +12,7 @@ export type SSEHandlers = {
   onDone?: (data: SEDoneData) => void;
   onError?: (error: SEEErrorData) => void;
   onConversationId?: (conversationId: number) => void; // 新增：提取 conversationId
+  onMessageId?: (messageId: string) => void; // 新增：提取 messageId
 };
 
 /**
@@ -203,6 +183,11 @@ export async function createSSEConnection(
  * 分发 SSE 事件到对应的处理器
  */
 function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): void {
+  // ⭐ 提取 messageId（从 chunk 或 done 事件）
+  if ('messageId' in eventData && eventData.messageId) {
+    handlers.onMessageId?.(eventData.messageId);
+  }
+
   if (eventData.type === 'chunk') {
     // 处理思考过程（reasoning 或 info 字段）
     const reasoningContent = (eventData as SSEChunkData).reasoning || (eventData as SSEChunkData).info;
@@ -218,7 +203,12 @@ function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): void 
       handlers.onConversationId?.((eventData as SSEChunkData).conversationId!);
     }
   } else if (eventData.type === 'done') {
-    handlers.onDone?.(eventData as SEDoneData);
+    const doneData = eventData as SEDoneData;
+    // 提取 conversationId（done 事件中可能包含）
+    if (doneData.conversationId) {
+      handlers.onConversationId?.(doneData.conversationId);
+    }
+    handlers.onDone?.(doneData);
   } else if (eventData.type === 'error') {
     handlers.onError?.(eventData as SEEErrorData);
   } else if (eventData.type === 'ping') {

@@ -2,6 +2,7 @@ package com.caius.agent.common.config;
 
 import com.caius.agent.module.auth.filter.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -22,7 +23,18 @@ import java.util.List;
 
 /**
  * Security 配置类
+ * 
+ * 权限说明：
+ * - 数据库存储 role 为 "ADMIN" 或 "USER"
+ * - JwtAuthenticationFilter 添加 "ROLE_" 前缀转换为 Spring Security 格式
+ * - SecurityConfig 使用 hasRole() 时不需要加 "ROLE_" 前缀
+ * 
+ * 示例：
+ * - 数据库: role = "ADMIN"
+ * - JWT Filter: 转换为 "ROLE_ADMIN"
+ * - SecurityConfig: hasRole("ADMIN") 自动检查 "ROLE_ADMIN"
  */
+@Slf4j
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
@@ -39,14 +51,21 @@ public class SecurityConfig {
                 .headers(headers -> headers.frameOptions(HeadersConfigurer.FrameOptionsConfig::disable))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // 公开接口（不需要认证）
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/error").permitAll()
+                        
+                        // Admin 接口（需要 ADMIN 角色）
+                        // hasRole("ADMIN") 会检查 "ROLE_ADMIN" 权限
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/admin/**").hasRole("ADMIN")
+                        
+                        // 其他接口（需要认证）
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
+        log.info("[Security] 安全配置完成");
         return http.build();
     }
 

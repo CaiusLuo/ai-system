@@ -16,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -34,6 +35,9 @@ class AdminUserServiceTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private PasswordEncoder passwordEncoder;
 
     @InjectMocks
     private AdminUserServiceImpl adminUserService;
@@ -120,6 +124,7 @@ class AdminUserServiceTest {
         request.setStatus("ACTIVE");
 
         when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(passwordEncoder.encode("password123")).thenReturn("hashedPassword123");
         when(userMapper.insert(any(User.class))).thenAnswer(invocation -> {
             User user = invocation.getArgument(0);
             user.setId(2L);
@@ -137,6 +142,7 @@ class AdminUserServiceTest {
         assertEquals("ACTIVE", response.getStatus());
 
         verify(userMapper, times(2)).selectCount(any(LambdaQueryWrapper.class));
+        verify(passwordEncoder, times(1)).encode("password123");
         verify(userMapper, times(1)).insert(any(User.class));
     }
 
@@ -227,15 +233,14 @@ class AdminUserServiceTest {
     void deleteUser_Success() {
         // 准备数据
         when(userMapper.selectById(1L)).thenReturn(testUser);
-        when(userMapper.updateById(any(User.class))).thenReturn(1);
+        when(userMapper.deleteById(1L)).thenReturn(1);
 
         // 执行测试
         adminUserService.deleteUser(1L);
 
-        // 验证结果
-        assertEquals(1, testUser.getDeleted());
+        // 验证结果 - MyBatis-Plus 的逻辑删除会自动设置 deleted=1
         verify(userMapper, times(1)).selectById(1L);
-        verify(userMapper, times(1)).updateById(any(User.class));
+        verify(userMapper, times(1)).deleteById(1L);
     }
 
     @Test

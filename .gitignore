@@ -30,6 +30,12 @@ Desktop.ini
 !.env.sample
 !.env.template
 
+# Explicit local secret files used by this monorepo
+/agent-python/.env
+/java-backend/.env
+/java-backend/src/main/resources/application-local.yml
+/java-backend/src/main/resources/application-*.local.yml
+
 # Logs and temporary files
 *.log
 logs/

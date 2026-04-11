@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# 禁止索引后台和管理页面
+Disallow: /admin/
+Disallow: /api/
+Disallow: /agent/
+
+# Sitemap 位置
+Sitemap: https://job-agent.example.com/sitemap.xml
