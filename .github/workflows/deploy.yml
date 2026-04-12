@@ -1,23 +1,321 @@
-name: Test Deploy
+name: Deploy
+
+# Required GitHub Secrets:
+# SERVER_HOST
+# SERVER_PORT
+# SERVER_USER
+# SERVER_SSH_KEY
+# DB_HOST
+# DB_PORT
+# DB_NAME
+# DB_USERNAME
+# DB_PASSWORD
+# REDIS_HOST
+# REDIS_PORT
+# REDIS_PASSWORD
+# JWT_SECRET
+# DEEPSEEK_API_KEY
+#
+# Optional GitHub Secrets:
+# SERVER_DOMAIN
+# DEEPSEEK_BASE_URL
+# DEEPSEEK_MODEL
+# LANGSMITH_API_KEY
+# CORS_ALLOW_ORIGINS
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
 
 jobs:
-  test-ssh:
+  deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      APP_DIR: /app/ai-system
+      RELEASE_SHA: ${{ github.sha }}
+      JAVA_VERSION: "21"
+      NODE_VERSION: "20"
+      PYTHON_VERSION: "3.10"
+      JAVA_SERVICE_NAME: ai-system-java
+      PYTHON_SERVICE_NAME: ai-system-python
+      NGINX_SITE_NAME: ai-system
+      DEPLOY_ARCHIVE: ai-system-${{ github.sha }}.tar.gz
     steps:
-      - name: Test SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: agent-frontend/pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Build frontend
+        working-directory: agent-frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build Java backend jar
+        working-directory: java-backend
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -DskipTests clean package
+
+      - name: Resolve backend jar
+        id: backend_jar
+        run: |
+          JAR_PATH="$(find java-backend/target -maxdepth 1 -type f -name '*.jar' ! -name 'original-*.jar' | head -n 1)"
+          if [ -z "$JAR_PATH" ]; then
+            echo "No Spring Boot jar was found under java-backend/target"
+            exit 1
+          fi
+          echo "path=$JAR_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Prepare deploy bundle
+        run: |
+          mkdir -p deploy/release/java-backend deploy/release/agent-python deploy/release/agent-frontend/dist
+
+          cp "${{ steps.backend_jar.outputs.path }}" deploy/release/java-backend/java-backend.jar
+
+          rsync -a \
+            --exclude='.env' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='.ruff_cache' \
+            --exclude='.python-version' \
+            agent-python/ deploy/release/agent-python/
+
+          rsync -a agent-frontend/dist/ deploy/release/agent-frontend/dist/
+
+      - name: Export Python requirements
+        working-directory: agent-python
+        run: |
+          uv export \
+            --frozen \
+            --no-dev \
+            --no-hashes \
+            --format requirements.txt \
+            -o ../deploy/release/agent-python/requirements.txt
+
+      - name: Create release archive
+        run: |
+          tar -C deploy/release -czf "${DEPLOY_ARCHIVE}" .
+
+      - name: Upload release archive to server
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
+          source: ${{ env.DEPLOY_ARCHIVE }}
+          target: /tmp
+          overwrite: true
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          APP_DIR: ${{ env.APP_DIR }}
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          DEPLOY_ARCHIVE: ${{ env.DEPLOY_ARCHIVE }}
+          JAVA_SERVICE_NAME: ${{ env.JAVA_SERVICE_NAME }}
+          PYTHON_SERVICE_NAME: ${{ env.PYTHON_SERVICE_NAME }}
+          NGINX_SITE_NAME: ${{ env.NGINX_SITE_NAME }}
+          SERVER_DOMAIN: ${{ secrets.SERVER_DOMAIN }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          CORS_ALLOW_ORIGINS: ${{ secrets.CORS_ALLOW_ORIGINS }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          envs: APP_DIR,RELEASE_SHA,DEPLOY_ARCHIVE,JAVA_SERVICE_NAME,PYTHON_SERVICE_NAME,NGINX_SITE_NAME,SERVER_DOMAIN,DB_HOST,DB_PORT,DB_NAME,DB_USERNAME,DB_PASSWORD,REDIS_HOST,REDIS_PORT,REDIS_PASSWORD,JWT_SECRET,DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DEEPSEEK_MODEL,LANGSMITH_API_KEY,CORS_ALLOW_ORIGINS
+          script_stop: true
           script: |
-            whoami
-            hostname
-            pwd
-            java -version
+            set -eu
+
+            if ! sudo -n true >/dev/null 2>&1; then
+              echo "The deploy user must have passwordless sudo for systemctl/nginx setup."
+              exit 1
+            fi
+
+            if ! command -v python3.10 >/dev/null 2>&1; then
+              echo "python3.10 is required on the server."
+              exit 1
+            fi
+
+            sudo mkdir -p "$APP_DIR"
+            sudo chown -R "$(id -un)":"$(id -gn)" "$APP_DIR"
+
+            RELEASE_DIR="$APP_DIR/releases/${RELEASE_SHA}-$(date +%Y%m%d%H%M%S)"
+            SHARED_DIR="$APP_DIR/shared"
+            CURRENT_LINK="$APP_DIR/current"
+
+            mkdir -p "$APP_DIR/releases" "$SHARED_DIR" "$RELEASE_DIR"
+            tar -xzf "/tmp/${DEPLOY_ARCHIVE}" -C "$RELEASE_DIR"
+
+            python3.10 -m venv "$RELEASE_DIR/agent-python/.venv"
+            "$RELEASE_DIR/agent-python/.venv/bin/pip" install --upgrade pip
+            "$RELEASE_DIR/agent-python/.venv/bin/pip" install -r "$RELEASE_DIR/agent-python/requirements.txt"
+
+            cat > "$SHARED_DIR/java-backend.env" <<EOF
+            DB_HOST=${DB_HOST}
+            DB_PORT=${DB_PORT}
+            DB_NAME=${DB_NAME}
+            DB_USERNAME=${DB_USERNAME}
+            DB_PASSWORD=${DB_PASSWORD}
+            REDIS_HOST=${REDIS_HOST}
+            REDIS_PORT=${REDIS_PORT}
+            REDIS_PASSWORD=${REDIS_PASSWORD}
+            JWT_SECRET=${JWT_SECRET}
+            PYTHON_AGENT_URL=http://127.0.0.1:5001
+            EOF
+
+            cat > "$SHARED_DIR/agent-python.env" <<EOF
+            DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+            DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+            DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+            LLM_TEMPERATURE=0.7
+            LLM_MAX_TOKENS=4096
+            LLM_TIMEOUT=60.0
+            JAVA_BACKEND_URL=http://127.0.0.1:8080
+            JAVA_BACKEND_TIMEOUT=5.0
+            APP_NAME=Job Agent API
+            APP_VERSION=1.0.0
+            DEBUG=false
+            HOST=0.0.0.0
+            PORT=5001
+            MAX_CONCURRENT_STREAMS=1000
+            PER_USER_STREAM_LIMIT=5
+            STREAM_TASK_TIMEOUT=600.0
+            CHUNK_TTL=3600
+            LLM_MAX_RETRIES=3
+            LLM_RETRY_BASE_DELAY=1.0
+            LLM_RETRY_MAX_DELAY=30.0
+            CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-*}
+            LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+            LANGSMITH_TRACING=false
+            LANGSMITH_PROJECT=job-agent
+            EOF
+
+            chmod 600 "$SHARED_DIR/java-backend.env" "$SHARED_DIR/agent-python.env"
+
+            ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+
+            sudo tee "/etc/systemd/system/${JAVA_SERVICE_NAME}.service" >/dev/null <<EOF
+            [Unit]
+            Description=AI System Java Backend
+            After=network.target mysql.service redis-server.service
+
+            [Service]
+            Type=simple
+            WorkingDirectory=${CURRENT_LINK}/java-backend
+            EnvironmentFile=${SHARED_DIR}/java-backend.env
+            ExecStart=/usr/bin/java -jar ${CURRENT_LINK}/java-backend/java-backend.jar --spring.profiles.active=prod
+            Restart=always
+            RestartSec=5
+            User=$(id -un)
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            sudo tee "/etc/systemd/system/${PYTHON_SERVICE_NAME}.service" >/dev/null <<EOF
+            [Unit]
+            Description=AI System Python Agent
+            After=network.target ${JAVA_SERVICE_NAME}.service
+
+            [Service]
+            Type=simple
+            WorkingDirectory=${CURRENT_LINK}/agent-python
+            EnvironmentFile=${SHARED_DIR}/agent-python.env
+            ExecStart=${CURRENT_LINK}/agent-python/.venv/bin/python ${CURRENT_LINK}/agent-python/main.py
+            Restart=always
+            RestartSec=5
+            User=$(id -un)
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            if [ ! -f "/etc/nginx/sites-available/${NGINX_SITE_NAME}.conf" ]; then
+              sudo tee "/etc/nginx/sites-available/${NGINX_SITE_NAME}.conf" >/dev/null <<EOF
+              server {
+                  listen 80;
+                  server_name ${SERVER_DOMAIN:-_};
+
+                  root ${CURRENT_LINK}/agent-frontend/dist;
+                  index index.html;
+
+                  location / {
+                      try_files \$uri \$uri/ /index.html;
+                  }
+
+                  location ~ ^/(auth|user|conversation|api|agent)(/.*)?$ {
+                      proxy_pass http://127.0.0.1:8080;
+                      proxy_http_version 1.1;
+                      proxy_set_header Host \$host;
+                      proxy_set_header X-Real-IP \$remote_addr;
+                      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                      proxy_set_header X-Forwarded-Proto \$scheme;
+                      proxy_set_header Connection "";
+                      proxy_buffering off;
+                      proxy_read_timeout 300s;
+                  }
+              }
+              EOF
+
+              sudo ln -sfn "/etc/nginx/sites-available/${NGINX_SITE_NAME}.conf" "/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
+            fi
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable "${JAVA_SERVICE_NAME}" "${PYTHON_SERVICE_NAME}"
+            sudo systemctl restart "${JAVA_SERVICE_NAME}" "${PYTHON_SERVICE_NAME}"
+            sudo nginx -t
+            sudo systemctl reload nginx
+
+            systemctl is-active "${JAVA_SERVICE_NAME}"
+            systemctl is-active "${PYTHON_SERVICE_NAME}"
+            curl --fail --silent http://127.0.0.1:5001/api/v1/health >/dev/null
