@@ -318,14 +318,12 @@ class AbortManagerTest {
 
         @Test
         @DisplayName("非所有者不能按 conversationId 中断")
-        void triggerAbortByConversationId_WithWrongUser_ShouldThrow403() {
+        void triggerAbortByConversationId_WithWrongUser_ShouldReturnFalse() {
             abortManager.createAbortFlag("message-1", 1L, 100L);
 
-            BusinessException exception = assertThrows(BusinessException.class,
-                    () -> abortManager.triggerAbortByConversationId(100L, 2L));
-
-            assertEquals(403, exception.getCode());
-            assertEquals("无权中断该会话", exception.getMessage());
+            // ⭐ 修复：现在返回 false 而非抛异常（支持同一 conversation 下多流）
+            boolean result = abortManager.triggerAbortByConversationId(100L, 2L);
+            assertEquals(false, result);
         }
     }
 }

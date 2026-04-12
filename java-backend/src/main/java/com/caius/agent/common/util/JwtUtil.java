@@ -124,6 +124,7 @@ public class JwtUtil {
             parseToken(token);
             return true;
         } catch (Exception e) {
+
             log.error("JWT 验证失败: {}", e.getMessage());
             return false;
         }

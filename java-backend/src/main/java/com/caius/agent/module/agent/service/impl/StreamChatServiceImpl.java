@@ -17,7 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.connection.stream.StreamOffset;
+import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -95,15 +95,17 @@ public class StreamChatServiceImpl implements StreamChatService {
         SseEmitter emitter = new SseEmitter(600000L);  // 600 秒（10 分钟）空闲超时
         SafeEmitter safeEmitter = new SafeEmitter(emitter);
 
-        // 生成 messageId 用于 abort 控制
+        // 生成 messageId 用于 abort 控制（v2 协议：传给 Python 作为 message_id）
         String messageId = UUID.randomUUID().toString();
+        // v2 协议：生成 requestId 用于全链路追踪
+        String requestId = "req-" + System.currentTimeMillis() + "-" + messageId.substring(0, 8);
         
         // 初始化 chunk 计数器
         streamChunkCounts.put(messageId, new AtomicInteger(0));
 
         CompletableFuture.runAsync(() -> {
             try {
-                handleStream(safeEmitter, userId, request, messageId);
+                handleStream(safeEmitter, userId, request, messageId, requestId);
             } finally {
                 activeCount.decrementAndGet();
                 // 清理 abort 标记，防止内存泄漏
@@ -153,7 +155,7 @@ public class StreamChatServiceImpl implements StreamChatService {
     /**
      * 处理流式请求
      */
-    private void handleStream(SafeEmitter emitter, Long userId, StreamChatRequest request, String messageId) {
+    private void handleStream(SafeEmitter emitter, Long userId, StreamChatRequest request, String messageId, String requestId) {
         // 标记是否是新创建的会话（用于 abort 时判断是否删除会话）
         boolean[] isNewConversation = {false};
 
@@ -166,14 +168,23 @@ public class StreamChatServiceImpl implements StreamChatService {
 
         // 创建 abort 标记并关联 conversationId
         abortManager.createAbortFlag(messageId, userId, conversationId);
-        
+
         // 获取共享的 chunk 计数器
         AtomicInteger chunkCount = streamChunkCounts.get(messageId);
-        
+
         log.info("[流式] 开始处理, userId={}, messageId={}, conversationId={}, isNewConversation={}",
                 userId, messageId, conversationId, isNewConversation[0]);
 
-        Map<String, Object> requestBody = buildRequestBody(userId, request, conversationId);
+        Map<String, Object> requestBody = buildRequestBody(userId, request, conversationId, messageId, requestId);
+        log.info("[流式] requestBody 构建完成: {}", requestBody);
+
+        // ⭐ 修复 BUG-1：立即创建 user message 和 assistant message 占位记录
+        log.info("[流式] 准备创建 user message");
+        Long userMessageId = createUserMessage(userId, conversationId, request.getMessage());
+        log.info("[流式] user message 创建完成, id={}", userMessageId);
+        log.info("[流式] 准备创建 assistant placeholder");
+        Message assistantPlaceholder = createAssistantPlaceholder(userId, conversationId, messageId);
+        log.info("[流式] assistant placeholder 创建完成, id={}", assistantPlaceholder.getId());
 
         // 内存缓冲：累积所有 chunk 数据（只在内存中，不写 IO）
         List<String> chunkDataBuffer = Collections.synchronizedList(new ArrayList<>());
@@ -182,11 +193,6 @@ public class StreamChatServiceImpl implements StreamChatService {
         AtomicBoolean aborted = new AtomicBoolean(false);
 
         String redisKey = cacheKeyFactory.streamChunks(userId, conversationId, messageId);
-
-        // ⭐ 方案2：延迟写入用户消息（不在请求开始时写入）
-        // 用户消息将在 done 事件中与 AI 消息一起异步写入
-        // 这样可以确保：要么都成功，要么都失败，不会留下孤儿记录
-        Long[] pendingUserMessageId = {null};  // 用于传递用户消息 ID 给异步任务
 
         CountDownLatch latch = new CountDownLatch(1);
         reactor.core.Disposable subscription = null;
@@ -223,10 +229,24 @@ public class StreamChatServiceImpl implements StreamChatService {
         }, taskTimeoutMinutes, TimeUnit.MINUTES);
 
         try {
-            Flux<SseEvent> eventFlux = streamGateway.streamChat(requestBody)
-                    .subscribeOn(Schedulers.boundedElastic());
+            // ⭐ 防御性日志：确认 Gateway 方法被调用
+            log.info("[流式] 准备调用 Gateway, requestBody={}", requestBody);
+            Flux<SseEvent> eventFlux;
+            try {
+                eventFlux = streamGateway.streamChat(requestBody);
+                log.info("[流式] Gateway 返回 Flux 对象, 准备 subscribeOn + subscribe");
+            } catch (Exception e) {
+                log.error("[流式] streamGateway.streamChat() 抛出异常", e);
+                if (completed.compareAndSet(false, true)) {
+                    emitter.trySendError("网关调用失败: " + e.getMessage());
+                    emitter.complete();
+                    latch.countDown();
+                }
+                return;
+            }
 
             subscription = eventFlux
+                    .subscribeOn(Schedulers.boundedElastic())
                     .doOnNext(sseEvent -> {
                         if (completed.get()) return;
 
@@ -241,18 +261,38 @@ public class StreamChatServiceImpl implements StreamChatService {
                                 return;
                             }
 
-                            // 🚀 立即发送给前端（唯一优先级）
-                            emitter.sendEvent(sseEvent);
-
                             String event = sseEvent.getEvent();
-                            if ("chunk".equals(event)) {
+                            if ("start".equals(event)) {
+                                // ⭐ v2 新增：Python 确认流式开始，记录日志
+                                log.info("[流式] Python 返回 start 事件, messageId={}", messageId);
+
+                                // 🚀 start 直接转发给前端
+                                emitter.sendEvent(sseEvent);
+
+                            } else if ("chunk".equals(event)) {
                                 // 只累积，不写 IO
-                                String content = extractContent(sseEvent.getData());
-                                if (content != null) {
-                                    fullContent.append(content);
-                                    chunkDataBuffer.add(sseEvent.getData());
-                                    chunkCount.incrementAndGet();
+                                // v2 兼容性：确保 chunk.data 中始终包含 string 类型 content（缺失/null -> ""）
+                                String normalizedChunkData = normalizeChunkDataJson(sseEvent.getData());
+                                String content = extractContentOrEmpty(normalizedChunkData);
+                                fullContent.append(content);
+                                chunkDataBuffer.add(normalizedChunkData);
+                                chunkCount.incrementAndGet();
+
+                                // 限制单条消息最大 chunk 数，防止无限流导致内存爆/连接被动中断
+                                if (chunkCount.get() > maxChunksPerMessage) {
+                                    log.warn("[流式] chunks 超限, messageId={}, chunks={}, maxChunksPerMessage={}，触发 abort",
+                                            messageId, chunkCount.get(), maxChunksPerMessage);
+                                    aborted.set(true);
+                                    completed.set(true);
+                                    abortManager.triggerAbort(messageId);
+                                    emitter.trySendError("生成内容过长，已自动中断");
+                                    emitter.complete();
+                                    return;
                                 }
+
+                                // 🚀 chunk 直接转发给前端（第一优先级）
+                                // 注意：这里用规范化后的 data 发给前端，避免出现 content:null / content 缺失
+                                emitter.sendEvent(new SseEvent("chunk", sseEvent.getId(), normalizedChunkData));
 
                             } else if ("done".equals(event)) {
                                 String title = extractTitle(sseEvent.getData());
@@ -260,36 +300,52 @@ public class StreamChatServiceImpl implements StreamChatService {
                                 // ⭐ 在 done 事件中注入 messageId（供前端获取）
                                 String doneDataWithMessageId = injectMessageId(sseEvent.getData(), messageId);
 
-                                // ⭐ 方案2：异步写入所有消息（用户消息 + AI 消息 + Redis）
-                                // 不阻塞 SSE 流，done 事件先发送给前端
+                                // ⭐ 修复 BUG-1：更新占位记录，而不是创建新记录
                                 final String finalTitle = title;
                                 final String finalDoneData = doneDataWithMessageId;
-                                
+                                final Long assistantMessageId = assistantPlaceholder.getId();
+
                                 CompletableFuture.runAsync(() -> {
                                     try {
-                                        // 1. 异步创建用户消息
-                                        Long userMsgId = createUserMessage(
-                                            userId, conversationId, request.getMessage());
-                                        pendingUserMessageId[0] = userMsgId;
-                                        
-                                        // 2. 异步创建 AI 消息
-                                        Message aiMsg = createAssistantMessage(
-                                            userId, conversationId, fullContent.toString(), finalTitle);
-                                        
-                                        // 3. 异步批量写 Redis（断线恢复用）
+                                        // 1. 更新 assistant message（content + title + streamingStatus）
+                                        updateAssistantMessage(assistantMessageId, fullContent.toString(), finalTitle, "completed");
+
+                                        // 2. 批量写 Redis（断线恢复用）
                                         if (!chunkDataBuffer.isEmpty()) {
                                             batchWriteToRedis(redisKey, messageId, chunkDataBuffer);
                                         }
-                                        
-                                        log.info("[存储] 异步保存完成, messageId={}, userMsgId={}, aiMsgId={}, chunks={}",
-                                                messageId, userMsgId, aiMsg.getId(), chunkDataBuffer.size());
-                                        
+
+                                        // ⭐ v2 协议：完整性校验（contentLength / chunkCount）
+                                        int expectedChunkCount = extractChunkCount(finalDoneData);
+                                        int expectedContentLength = extractContentLength(finalDoneData);
+                                        int actualChunks = chunkDataBuffer.size();
+                                        int actualContentLength = fullContent.length();
+
+                                        if (expectedChunkCount >= 0 && expectedChunkCount != actualChunks) {
+                                            log.warn("[完整性] chunkCount 不匹配, messageId={}, expected={}, actual={}",
+                                                    messageId, expectedChunkCount, actualChunks);
+                                        }
+                                        if (expectedContentLength >= 0 && expectedContentLength != actualContentLength) {
+                                            log.warn("[完整性] contentLength 不匹配, messageId={}, expected={}, actual={}",
+                                                    messageId, expectedContentLength, actualContentLength);
+                                        }
+
+                                        log.info("[存储] 异步更新完成, messageId={}, assistantMessageId={}, chunks={}, contentLen={}",
+                                                messageId, assistantMessageId, actualChunks, actualContentLength);
+
                                     } catch (Exception e) {
-                                        log.error("[存储] 异步保存失败, messageId={}", messageId, e);
+                                        log.error("[存储] 异步更新失败, messageId={}", messageId, e);
+                                        // 尝试标记为 error 状态
+                                        try {
+                                            updateAssistantMessage(assistantMessageId, fullContent.toString(), finalTitle, "error");
+                                        } catch (Exception ex) {
+                                            log.error("[存储] 标记 error 状态也失败, messageId={}", messageId, ex);
+                                        }
                                     }
                                 }, storageExecutor);
 
-                                // ⭐ 发送包含 messageId 的 done 事件（不等待 DB 写入完成）
+                                // ⭐ 只发送一次 done（不再先转发原始 done，避免前端收到两次 done）
+                                // 且不等待 DB 写入完成，保证 SSE 优先
                                 SseEvent doneEvent = new SseEvent("done", sseEvent.getId(), finalDoneData);
                                 emitter.sendEvent(doneEvent);
 
@@ -298,13 +354,39 @@ public class StreamChatServiceImpl implements StreamChatService {
 
                             } else if ("error".equals(event)) {
                                 completed.set(true);
-                                // ⭐ 方案3：error 场景也清理（虽然用户消息还没写入，但需要清理 Redis）
-                                final String errorMsg = "AI 服务返回错误";
+                                // ⭐ v2 协议：区分 ABORTED（正常中断）和 STREAM_ERROR（异常）
+                                String errorCode = extractErrorCode(sseEvent.getData());
+                                final Long assistantMessageId = assistantPlaceholder.getId();
+                                final boolean isUserAbort = "ABORTED".equals(errorCode);
+
                                 CompletableFuture.runAsync(() -> {
+                                    try {
+                                        String status = isUserAbort ? "aborted" : "error";
+                                        updateAssistantMessage(assistantMessageId, fullContent.toString(), null, status);
+                                    } catch (Exception e) {
+                                        log.error("[存储] error 状态更新失败, messageId={}", messageId, e);
+                                    }
                                     cleanupAfterError(userId, conversationId, messageId, redisKey, isNewConversation[0]);
                                 }, storageExecutor);
-                                emitter.trySendError(errorMsg);
-                                emitter.complete();
+
+                                if (isUserAbort) {
+                                    log.info("[流式] Python 返回 ABORTED 错误, messageId={}", messageId);
+                                    // ⭐ ABORTED 按正常结束处理：原样转发给前端（只发一次）
+                                    emitter.sendEvent(sseEvent);
+                                    emitter.complete();
+                                } else {
+                                    // ⭐ 先把 python error 原样转发给前端（便于前端拿到 errorCode / message 等）
+                                    try {
+                                        emitter.sendEvent(sseEvent);
+                                    } catch (Exception ignored) {
+                                        // 如果客户端已断开，忽略
+                                    }
+                                    emitter.trySendError("AI 服务异常");
+                                    emitter.complete();
+                                }
+                            } else {
+                                // 其他未知事件：优先转发
+                                emitter.sendEvent(sseEvent);
                             }
 
                         } catch (IOException e) {
@@ -343,13 +425,12 @@ public class StreamChatServiceImpl implements StreamChatService {
                         timeoutFuture.cancel(false);
                         timeoutScheduler.shutdownNow();
 
-                        // ⭐ 如果是 abort，清理中间数据
-                        // 注意：由于用户消息延迟写入，abort 时通常只需清理 Redis
-                        // 但如果 done 事件的异步写入已启动，可能需要特殊处理
+                        // ⭐ 修复 BUG-9：如果是 abort，清理中间数据
+                        // 由于 user message 已立即写入，abort 时只需清理 assistant message 和 Redis
                         if (aborted.get()) {
                             cleanupAbortedMessages(
                                 userId, conversationId, messageId,
-                                pendingUserMessageId[0],  // 可能为 null（done 异步未完成时）
+                                assistantPlaceholder.getId(),
                                 redisKey, isNewConversation[0]);
                         }
 
@@ -382,33 +463,39 @@ public class StreamChatServiceImpl implements StreamChatService {
     // ==================== 辅助方法 ====================
 
     /**
-     * ⭐ 方案2：用户消息和 AI 消息在同一异步任务中写入
-     * 确保数据一致性：要么都成功，要么都失败
+     * ⭐ 修复 BUG-1：创建 assistant message 占位记录
+     * 在收到首个 chunk 之前就创建，保证 DB 中有记录
      */
-    private void saveMessagesAsync(Long userId, Long conversationId, String userMessage,
-                                   String aiContent, String aiTitle, String redisKey,
-                                   String messageId, List<String> chunkDataBuffer) {
-        CompletableFuture.runAsync(() -> {
-            try {
-                // 1. 创建用户消息
-                Long userMsgId = createUserMessage(userId, conversationId, userMessage);
-                
-                // 2. 创建 AI 消息
-                Message aiMsg = createAssistantMessage(userId, conversationId, aiContent, aiTitle);
-                
-                // 3. 批量写 Redis（断线恢复用）
-                if (!chunkDataBuffer.isEmpty()) {
-                    batchWriteToRedis(redisKey, messageId, chunkDataBuffer);
-                }
-                
-                log.info("[存储] 异步保存完成, messageId={}, userMsgId={}, aiMsgId={}, chunks={}",
-                        messageId, userMsgId, aiMsg.getId(), chunkDataBuffer.size());
-                
-            } catch (Exception e) {
-                log.error("[存储] 异步保存失败, messageId={}", messageId, e);
-            }
-        }, storageExecutor);
+    private Message createAssistantPlaceholder(Long userId, Long conversationId, String messageId) {
+        Message msg = new Message();
+        msg.setConversationId(conversationId);
+        msg.setUserId(userId);
+        msg.setRole("assistant");
+        msg.setContent("");  // 占位空内容
+        msg.setTitle(null);
+        msg.setStreamingStatus("streaming");  // 标记为流式中
+        msg.setDeleted(0);
+        msg.setCreatedAt(LocalDateTime.now());
+        msg.setUpdatedAt(LocalDateTime.now());
+        messageMapper.insert(msg);
+        log.debug("[存储] 已创建 assistant message 占位记录, id={}, messageId={}", msg.getId(), messageId);
+        return msg;
     }
+
+    /**
+     * ⭐ 修复 BUG-1：更新 assistant message（流式完成后）
+     */
+    private void updateAssistantMessage(Long messageId, String content, String title, String streamingStatus) {
+        Message msg = new Message();
+        msg.setId(messageId);
+        msg.setContent(content);
+        msg.setTitle(title);
+        msg.setStreamingStatus(streamingStatus);  // completed / error / aborted
+        msg.setUpdatedAt(LocalDateTime.now());
+        messageMapper.updateById(msg);
+        log.debug("[存储] 已更新 assistant message, id={}, status={}", messageId, streamingStatus);
+    }
+
 
     /**
      * Redis 批量写入（优化版：pipelined XADD + MAXLEN + TTL）
@@ -461,21 +548,25 @@ public class StreamChatServiceImpl implements StreamChatService {
     // ==================== 辅助方法 ====================
 
     /**
-     * 在 done 事件中注入 messageId（供前端获取）
+     * 在 done 事件中确保携带 messageId（供前端获取）
+     * ⭐ v2 协议：Python 已在每个事件中包含 messageId，这里只做兜底
      */
     private String injectMessageId(String doneDataJson, String messageId) {
         try {
             JsonNode node = objectMapper.readTree(doneDataJson);
             if (node.isObject()) {
-                ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("messageId", messageId);
+                // v2 协议：如果 Python 已经带了 messageId，就不再注入
+                if (!node.has("messageId")) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("messageId", messageId);
+                }
                 return objectMapper.writeValueAsString(node);
             }
         } catch (Exception e) {
             log.warn("[流式] 注入 messageId 失败，返回原始数据", e);
         }
-        // 如果解析失败，在原始 JSON 后追加 messageId
-        if (doneDataJson.endsWith("}")) {
-            return doneDataJson.substring(0, doneDataJson.length() - 1) 
+        // 兜底：如果解析失败，尝试在 JSON 后追加
+        if (doneDataJson.endsWith("}") && !doneDataJson.contains("\"messageId\"")) {
+            return doneDataJson.substring(0, doneDataJson.length() - 1)
                     + ",\"messageId\":\"" + messageId + "\"}";
         }
         return doneDataJson;
@@ -534,6 +625,64 @@ public class StreamChatServiceImpl implements StreamChatService {
         }
     }
 
+    /**
+     * 提取 chunk content，保证永不返回 null。
+     *
+     * 说明：
+     * - content 缺失/解析失败/JSON null -> ""
+     * - 其余情况 -> 按字符串返回
+     */
+    private String extractContentOrEmpty(String data) {
+        try {
+            JsonNode node = objectMapper.readTree(data);
+            if (!node.has("content")) {
+                return "";
+            }
+            JsonNode contentNode = node.get("content");
+            if (contentNode == null || contentNode.isNull()) {
+                return "";
+            }
+            return contentNode.asText("");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 规范化 chunk data JSON：确保 content 字段存在且为字符串（缺失/null -> ""）。
+     *
+     * 目的：前端 SSEChunkData.content 期望 string，但 Python 可能输出缺失或 null。
+     * 这里做协议兜底，保证前端收到的 chunk 永远是可消费的 JSON。
+     */
+    private String normalizeChunkDataJson(String dataJson) {
+        if (dataJson == null || dataJson.isBlank()) {
+            return "{}";
+        }
+        try {
+            JsonNode node = objectMapper.readTree(dataJson);
+
+            // 只对 JSON Object 做规范化，其他情况（数组/字符串等）保持原样
+            if (!node.isObject()) {
+                return dataJson;
+            }
+
+            com.fasterxml.jackson.databind.node.ObjectNode obj = (com.fasterxml.jackson.databind.node.ObjectNode) node;
+            JsonNode contentNode = obj.get("content");
+
+            // content 缺失 或 为 null => 写入空字符串
+            if (contentNode == null || contentNode.isNull()) {
+                obj.put("content", "");
+            } else if (!contentNode.isTextual()) {
+                // content 如果是非字符串类型（例如 number/bool/object），强制转成字符串，避免前端类型异常
+                obj.put("content", contentNode.asText(""));
+            }
+            return objectMapper.writeValueAsString(obj);
+        } catch (Exception e) {
+            // 解析失败（可能是脏数据），不强改原文，防止制造更大问题
+            return dataJson;
+        }
+    }
+
     private String extractTitle(String data) {
         try {
             JsonNode node = objectMapper.readTree(data);
@@ -546,13 +695,49 @@ public class StreamChatServiceImpl implements StreamChatService {
         return "对话完成";
     }
 
-    private Map<String, Object> buildRequestBody(Long userId, StreamChatRequest request, Long conversationId) {
+    /**
+     * ⭐ v2 协议：提取 errorCode（区分 ABORTED 和 STREAM_ERROR）
+     */
+    private String extractErrorCode(String data) {
+        try {
+            JsonNode node = objectMapper.readTree(data);
+            return node.has("errorCode") ? node.get("errorCode").asText() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * ⭐ v2 协议：提取 done 事件中的完整性校验字段
+     */
+    private int extractChunkCount(String data) {
+        try {
+            JsonNode node = objectMapper.readTree(data);
+            return node.has("chunkCount") ? node.get("chunkCount").asInt() : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private int extractContentLength(String data) {
+        try {
+            JsonNode node = objectMapper.readTree(data);
+            return node.has("contentLength") ? node.get("contentLength").asInt() : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private Map<String, Object> buildRequestBody(Long userId, StreamChatRequest request, Long conversationId, String messageId, String requestId) {
         Map<String, Object> body = new HashMap<>();
         body.put("message", request.getMessage());
         if (request.getSessionId() != null) body.put("session_id", request.getSessionId());
         if (conversationId != null) body.put("conversation_id", conversationId);
         body.put("user_id", userId);
         body.put("stream", true);
+        // ⭐ v2 协议：传入 message_id 和 request_id
+        body.put("message_id", messageId);
+        if (requestId != null) body.put("request_id", requestId);
         return body;
     }
 
@@ -561,19 +746,69 @@ public class StreamChatServiceImpl implements StreamChatService {
         conversationOwnershipService.requireOwnedConversation(conversationId, userId);
         String redisKey = cacheKeyFactory.streamChunks(userId, conversationId, messageId);
         try {
-            var records = redisTemplate.opsForStream().read(StreamOffset.fromStart(redisKey));
-            if (records != null) {
-                for (var record : records) {
-                    String dataJson = (String) record.getValue().get("data");
-                    if (dataJson != null) {
-                        JsonNode node = objectMapper.readTree(dataJson);
+            // ⭐ 修复 BUG-2：使用 execute + XRANGE 命令，避免 Spring Data Redis API 兼容性问题
+            Boolean exists = redisTemplate.hasKey(redisKey);
+            if (Boolean.FALSE.equals(exists)) {
+                log.warn("[断线恢复] Redis key 不存在, key={}", redisKey);
+                return;
+            }
+
+            // 直接使用 execute 执行 XRANGE 命令
+            List<MapRecord<String, Object, Object>> records = redisTemplate.execute(
+                    (org.springframework.data.redis.core.RedisCallback<List<MapRecord<String, Object, Object>>>) connection -> {
+                        byte[] keyBytes = redisKey.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        // XRANGE key start end [COUNT count]
+                        return (List) connection.streamCommands().xRange(keyBytes, null, null);
+                    }
+            );
+
+            if (records != null && !records.isEmpty()) {
+                int recovered = 0;
+                for (MapRecord<String, Object, Object> record : records) {
+                    // 跳过 lastEventId 及之前的记录
+                    if (lastEventId != null && !lastEventId.isBlank()) {
+                        String recordId = record.getId() != null ? record.getId().getValue() : null;
+                        if (recordId != null && recordId.compareTo(lastEventId) <= 0) {
+                            continue;
+                        }
+                    }
+
+                    Object dataObj = record.getValue().get("data");
+                    if (dataObj != null) {
+                        String dataJson = dataObj.toString();
+                        JsonNode node;
+                        try {
+                            node = objectMapper.readTree(dataJson);
+                        } catch (Exception parseEx) {
+                            // Redis 中可能混入非 JSON / 脏数据，跳过，避免断线恢复整体失败
+                            log.warn("[断线恢复] 跳过无法解析的 data, messageId={}, recordId={}, data={}",
+                                    messageId,
+                                    record.getId() != null ? record.getId().getValue() : null,
+                                    dataJson);
+                            continue;
+                        }
+
+                        if (node == null || node.isNull()) {
+                            log.warn("[断线恢复] 跳过空 JSON 节点, messageId={}, recordId={}", messageId,
+                                    record.getId() != null ? record.getId().getValue() : null);
+                            continue;
+                        }
+
                         String type = node.has("type") ? node.get("type").asText() : "chunk";
-                        emitter.send(SseEmitter.event().name(type).id(record.getId().getValue()).data(dataJson));
+                        String eventId = record.getId() != null ? record.getId().getValue() : null;
+                        emitter.send(SseEmitter.event()
+                                .name(type)
+                                .id(eventId)
+                                .data(dataJson));
+                        recovered++;
                     }
                 }
+                log.info("[断线恢复] 恢复成功, userId={}, conversationId={}, messageId={}, 恢复条数={}",
+                        userId, conversationId, messageId, recovered);
             }
         } catch (Exception e) {
-            log.error("[断线恢复] 失败", e);
+            log.error("[断线恢复] 失败, userId={}, conversationId={}, messageId={}",
+                    userId, conversationId, messageId, e);
         }
     }
 
@@ -605,47 +840,38 @@ public class StreamChatServiceImpl implements StreamChatService {
     /**
      * 清理 abort 后的中间数据
      *
-     * ⭐ 方案2 改进：由于用户消息延迟写入，abort 时通常只需清理 Redis
-     * 如果 done 事件的异步写入已启动，userMessageId 可能不为 null
-     *
      * @param conversationId 会话ID
      * @param messageId 消息ID
-     * @param userMessageId 用户消息ID（可能为 null）
+     * @param assistantMessageId assistant message ID（占位记录）
      * @param redisKey Redis key
      * @param isNewConversation 是否是新创建的会话
      */
     private void cleanupAbortedMessages(Long userId, Long conversationId, String messageId,
-                                         Long userMessageId, String redisKey, boolean isNewConversation) {
-        log.info("[Abort] 清理中间数据, conversationId={}, messageId={}, userMessageId={}, isNewConversation={}",
-                conversationId, messageId, userMessageId, isNewConversation);
+                                         Long assistantMessageId, String redisKey, boolean isNewConversation) {
+        log.info("[Abort] 清理中间数据, conversationId={}, messageId={}, assistantMessageId={}, isNewConversation={}",
+                conversationId, messageId, assistantMessageId, isNewConversation);
 
         try {
             // 1. 删除 Redis Stream 数据
             redisTemplate.delete(redisKey);
             log.debug("[Abort] 已清理 Redis Stream: {}", redisKey);
 
-            // 2. 删除用户消息（如果已写入）
-            if (userMessageId != null) {
-                messageMapper.delete(
-                        new LambdaQueryWrapper<Message>()
-                                .eq(Message::getId, userMessageId)
-                                .eq(Message::getUserId, userId)
-                );
-                log.debug("[Abort] 已删除用户消息: {}", userMessageId);
-            } else {
-                log.debug("[Abort] 用户消息尚未写入，跳过删除");
+            // 2. 标记 assistant message 为 aborted（而非删除，保留审计痕迹）
+            if (assistantMessageId != null) {
+                updateAssistantMessage(assistantMessageId, "", null, "aborted");
+                log.debug("[Abort] 已标记 assistant message 为 aborted: {}", assistantMessageId);
             }
 
-            // 3. 如果是新创建的会话，检查是否有消息存在
-            // 如果没有任何消息，删除空会话
+            // 3. 如果是新创建的会话，检查是否有其他消息存在
             if (isNewConversation && conversationId != null) {
                 long messageCount = messageMapper.selectCount(
                     new LambdaQueryWrapper<Message>()
                         .eq(Message::getConversationId, conversationId)
                         .eq(Message::getUserId, userId)
                 );
-                
-                if (messageCount == 0) {
+
+                // 如果只有这条 aborted 的 assistant message（或没有其他消息），删除空会话
+                if (messageCount <= 1) {
                     conversationMapper.delete(
                             new LambdaQueryWrapper<Conversation>()
                                     .eq(Conversation::getId, conversationId)
@@ -653,7 +879,7 @@ public class StreamChatServiceImpl implements StreamChatService {
                     );
                     log.info("[Abort] 已删除空会话: {}", conversationId);
                 } else {
-                    log.info("[Abort] 会话已有消息，保留会话: {}, 消息数={}", conversationId, messageCount);
+                    log.info("[Abort] 会话已有其他消息，保留会话: {}, 消息数={}", conversationId, messageCount);
                 }
             } else {
                 log.info("[Abort] 保留已有会话: {}", conversationId);

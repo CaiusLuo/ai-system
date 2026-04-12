@@ -1,6 +1,7 @@
 """Abort 控制器测试"""
 import pytest
 import asyncio
+import time
 from agent.core.abort import AbortController
 
 
@@ -59,3 +60,57 @@ class TestAbortController:
         assert controller.is_aborted("msg-456") is True
         assert controller.is_aborted(789) is False
         assert controller.is_aborted("msg-789") is False
+
+    def test_ttl_expiration(self):
+        """测试 TTL 过期自动清理"""
+        # 使用极短 TTL 测试过期逻辑（10ms）
+        controller = AbortController(ttl=0.01)
+        controller.abort(123)
+        assert controller.is_aborted(123) is True
+
+        # 等待 TTL 过期
+        time.sleep(0.02)
+
+        # 过期后应返回 False
+        assert controller.is_aborted(123) is False
+
+    def test_ttl_does_not_affect_other_keys(self):
+        """测试 TTL 过期不影响其他 key"""
+        controller = AbortController(ttl=0.01)
+        controller.abort(123)
+        controller.abort("msg-456")
+
+        time.sleep(0.02)
+
+        # 123 过期
+        assert controller.is_aborted(123) is False
+        # msg-456 也过期（同时创建）
+        assert controller.is_aborted("msg-456") is False
+
+        # 新建一个未过期的 key（在过期后创建，时间戳是新的）
+        controller.abort("msg-789")
+        # 立即检查，应未过期
+        assert controller.is_aborted("msg-789") is True
+        # 等过期
+        time.sleep(0.02)
+        assert controller.is_aborted("msg-789") is False
+
+    def test_size_method(self):
+        """测试 size 方法"""
+        controller = AbortController()
+        assert controller.size() == 0
+
+        controller.abort(1)
+        controller.abort(2)
+        controller.abort("msg-3")
+        assert controller.size() == 3
+
+        controller.clear(1)
+        assert controller.size() == 2
+
+    def test_ttl_with_active_key(self):
+        """测试 TTL 不立即影响未过期的 key"""
+        controller = AbortController(ttl=60)  # 1 分钟 TTL
+        controller.abort("msg-test")
+        assert controller.is_aborted("msg-test") is True
+        assert controller.size() == 1

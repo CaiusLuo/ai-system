@@ -63,7 +63,12 @@ class DeepSeekService(LLMGateway):
 
         try:
             response = await self._llm.ainvoke(langchain_messages)
-            return response.content
+            # response.content 可能是 str 或 list，统一转为 str
+            if isinstance(response.content, str):
+                return response.content
+            elif isinstance(response.content, list):
+                return "".join(item for item in response.content if isinstance(item, str))
+            return ""
         except Exception as e:
             logger.error(f"LLM 调用失败: {e}", exc_info=True)
             raise
@@ -95,8 +100,22 @@ class DeepSeekService(LLMGateway):
                 reasoning = None
 
                 # 提取正常回复内容
+                # 注意：LangChain 新版中 chunk.content 可能是 list[dict]（多模态/工具调用），
+                # 需要统一转为字符串，确保下游拿到的 content 永远是 str 类型
                 if hasattr(chunk, "content") and chunk.content:
-                    content = chunk.content
+                    if isinstance(chunk.content, str):
+                        content = chunk.content
+                    elif isinstance(chunk.content, list):
+                        # 多内容块：拼接所有文本片段
+                        content = "".join(
+                            item for item in chunk.content if isinstance(item, str)
+                        )
+                    else:
+                        # 未知类型，降级为空字符串
+                        logger.warning(
+                            f"chunk.content 类型异常: {type(chunk.content)}, 降级为空字符串"
+                        )
+                        content = ""
 
                 # 提取 reasoning_content（DeepSeek think 模式）
                 # LangChain 的 AIMessageChunk 可能通过 additional_kwargs 或 response_metadata 传递
@@ -104,7 +123,8 @@ class DeepSeekService(LLMGateway):
                 if reasoning_content:
                     reasoning = reasoning_content
 
-                # 只有当有内容或 reasoning 时才 yield
+                # 只要 content 或 reasoning 任一有值就 yield
+                # 注意：content 始终保证是 str 类型，即使为空
                 if content or reasoning:
                     yield {
                         "content": content,

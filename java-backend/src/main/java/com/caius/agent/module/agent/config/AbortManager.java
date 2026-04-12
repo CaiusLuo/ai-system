@@ -4,6 +4,7 @@ import com.caius.agent.common.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -30,17 +31,15 @@ public class AbortManager {
     private final ConcurrentHashMap<String, AtomicBoolean> abortMap = new ConcurrentHashMap<>();
 
     /**
-     * conversationId -> (userId, messageId) 映射
+     * conversationId -> Set<messageId> 映射
+     * ⭐ 修复 BUG-7：支持同一 conversation 下多个活跃流
      */
-    private final ConcurrentHashMap<Long, ConversationAbortContext> conversationMessageMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Set<String>> conversationMessageMap = new ConcurrentHashMap<>();
 
     /**
      * messageId -> userId 映射
      */
     private final ConcurrentHashMap<String, Long> messageOwnerMap = new ConcurrentHashMap<>();
-
-    private record ConversationAbortContext(Long userId, String messageId) {
-    }
 
     /**
      * 创建 abort 标记（任务开始时调用）
@@ -72,7 +71,10 @@ public class AbortManager {
             messageOwnerMap.put(messageId, userId);
         }
         if (conversationId != null && userId != null) {
-            conversationMessageMap.put(conversationId, new ConversationAbortContext(userId, messageId));
+            // ⭐ 修复 BUG-7：使用 Set 存储同一 conversation 下的多个 messageId
+            conversationMessageMap
+                    .computeIfAbsent(conversationId, k -> ConcurrentHashMap.newKeySet())
+                    .add(messageId);
             log.debug("[AbortManager] 关联 userId={}, conversationId={}, messageId={}", userId, conversationId, messageId);
         }
     }
@@ -119,34 +121,55 @@ public class AbortManager {
 
     /**
      * 通过 conversationId 触发 abort
-     * 
+     * ⭐ 修复 BUG-7：中断该 conversation 下所有活跃流
+     *
      * @param conversationId 会话 ID
      * @return true = 成功设置, false = 没有找到活跃流
      */
     public boolean triggerAbortByConversationId(Long conversationId) {
-        ConversationAbortContext context = conversationMessageMap.get(conversationId);
-        if (context == null) {
+        Set<String> messageIds = conversationMessageMap.get(conversationId);
+        if (messageIds == null || messageIds.isEmpty()) {
             log.warn("[AbortManager] 没有找到 conversationId 对应的活跃流, conversationId={}", conversationId);
             return false;
         }
-        return triggerAbort(context.messageId());
+        boolean anySuccess = false;
+        for (String msgId : messageIds) {
+            if (triggerAbort(msgId)) {
+                anySuccess = true;
+            }
+        }
+        return anySuccess;
     }
 
     public boolean triggerAbortByConversationId(Long conversationId, Long userId) {
-        ConversationAbortContext context = conversationMessageMap.get(conversationId);
-        if (context == null) {
+        Set<String> messageIds = conversationMessageMap.get(conversationId);
+        if (messageIds == null || messageIds.isEmpty()) {
             log.warn("[AbortManager] 没有找到 conversationId 对应的活跃流, conversationId={}", conversationId);
             return false;
         }
-        if (!context.userId().equals(userId)) {
-            throw new BusinessException(403, "无权中断该会话");
+        boolean anySuccess = false;
+        for (String msgId : messageIds) {
+            Long ownerId = messageOwnerMap.get(msgId);
+            if (ownerId != null && ownerId.equals(userId)) {
+                if (triggerAbort(msgId)) {
+                    anySuccess = true;
+                }
+            } else if (ownerId == null) {
+                // 没有归属的消息也尝试（兼容性）
+                if (triggerAbort(msgId)) {
+                    anySuccess = true;
+                }
+            }
         }
-        return triggerAbort(context.messageId());
+        if (!anySuccess) {
+            log.warn("[AbortManager] 无权中断 conversationId={} 下的任何流", conversationId);
+        }
+        return anySuccess;
     }
 
     /**
      * 清理 abort 标记（任务结束或中断后调用）
-     * 
+     *
      * @param messageId 消息唯一标识
      */
     public void cleanup(String messageId) {
@@ -159,10 +182,13 @@ public class AbortManager {
 
         messageOwnerMap.remove(messageId);
 
-        // 同时清理 conversationMessageMap
-        conversationMessageMap.entrySet().removeIf(entry -> 
-            entry.getValue().messageId().equals(messageId)
-        );
+        // ⭐ 修复 BUG-7：从 Set 中移除 messageId，如果 Set 为空则删除整个 key
+        conversationMessageMap.forEach((convId, msgIdSet) -> {
+            msgIdSet.remove(messageId);
+            if (msgIdSet.isEmpty()) {
+                conversationMessageMap.remove(convId);
+            }
+        });
     }
 
     /**

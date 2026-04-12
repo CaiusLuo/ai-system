@@ -5,6 +5,13 @@ spring:
     url: ${DB_URL:jdbc:mysql://localhost:3306/agent_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
+    hikari:
+      max-lifetime: 1800000    # 30 分钟（必须小于 MySQL wait_timeout，默认 28800 秒=8 小时）
+      idle-timeout: 600000     # 10 分钟
+      connection-timeout: 30000 # 30 秒
+      validation-timeout: 5000  # 5 秒
+      minimum-idle: 5
+      maximum-pool-size: 20
   data:
     redis:
       host: ${REDIS_HOST:localhost}

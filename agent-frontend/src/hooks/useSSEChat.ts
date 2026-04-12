@@ -42,6 +42,17 @@ export function useSSEChat(): UseSSEChatReturn {
   const messageIdRef = useRef<string | null>(null); // 存储当前 messageId
   const streamingBufferRef = useRef('');
   const streamingReasoningBufferRef = useRef('');
+  const isLoadingRef = useRef(false); // 用 ref 避免闭包问题
+  const conversationIdRef = useRef<number | null>(null); // 用 ref 追踪当前会话 ID
+
+  // 同步 ref 与 state（保证 ref 始终是最新的）
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   // 关闭当前 SSE 连接（通过 AbortController）
   const closeConnection = useCallback(() => {
@@ -52,8 +63,8 @@ export function useSSEChat(): UseSSEChatReturn {
   }, []);
 
   // 发送消息
-  const sendMessage = useCallback(async (message: string, conversationId?: number) => {
-    if (!message.trim() || isLoading) return;
+  const sendMessage = useCallback(async (message: string, convId?: number) => {
+    if (!message.trim() || isLoadingRef.current) return;
 
     // 清除之前的连接
     closeConnection();
@@ -75,6 +86,10 @@ export function useSSEChat(): UseSSEChatReturn {
 
     // 设置加载状态
     setIsLoading(true);
+    isLoadingRef.current = true;
+
+    // 使用传入的 convId 或 ref 中的当前 conversationId
+    const effectiveConvId = convId ?? conversationIdRef.current ?? undefined;
 
     // 创建 SSE 处理器
     const handlers: SSEHandlers = {
@@ -88,6 +103,8 @@ export function useSSEChat(): UseSSEChatReturn {
       },
 
       onChunk: (content: string, _index: number) => {
+        // 防御：跳过 undefined/null/空字符串，防止 "" + undefined → "undefined"
+        if (!content) return;
         // 累加 chunk 内容
         streamingBufferRef.current += content;
         // 使用 flushSync 确保立即渲染，打破 React 批处理
@@ -97,6 +114,8 @@ export function useSSEChat(): UseSSEChatReturn {
       },
 
       onReasoning: (reasoning: string, _index: number) => {
+        // 防御：跳过 undefined/null/空字符串
+        if (!reasoning) return;
         // 累加思考过程
         streamingReasoningBufferRef.current += reasoning;
         // 使用 flushSync 确保立即渲染
@@ -107,6 +126,7 @@ export function useSSEChat(): UseSSEChatReturn {
 
       onConversationId: (newConversationId: number) => {
         // 保存首次返回的 conversationId
+        conversationIdRef.current = newConversationId;
         setConversationId(newConversationId);
         console.debug('[SSE] Received conversationId:', newConversationId);
       },
@@ -114,12 +134,14 @@ export function useSSEChat(): UseSSEChatReturn {
       onDone: (data: SEDoneData) => {
         console.debug('[SSE] Stream completed, messageId:', data.messageId);
 
-        // 将流式消息添加到消息列表
+        // 将流式消息添加到消息列表（带上 messageId 和 conversationId）
         if (streamingBufferRef.current || streamingReasoningBufferRef.current) {
           const assistantMessage: Message = {
             role: 'assistant',
             content: streamingBufferRef.current,
             reasoning: streamingReasoningBufferRef.current || undefined,
+            id: typeof data.messageId === 'string' ? parseInt(data.messageId, 10) || undefined : data.messageId,
+            conversationId: data.conversationId,
           };
           setMessages((prev) => [...prev, assistantMessage]);
         }
@@ -130,6 +152,7 @@ export function useSSEChat(): UseSSEChatReturn {
         streamingBufferRef.current = '';
         streamingReasoningBufferRef.current = '';
         setIsLoading(false);
+        isLoadingRef.current = false;
         abortControllerRef.current = null;
       },
 
@@ -137,6 +160,7 @@ export function useSSEChat(): UseSSEChatReturn {
         console.error('[SSE] Error:', errorData.message);
         setError(errorData.message);
         setIsLoading(false);
+        isLoadingRef.current = false;
         abortControllerRef.current = null;
       },
     };
@@ -145,7 +169,7 @@ export function useSSEChat(): UseSSEChatReturn {
       // 启动 SSE 连接
       await createSSEConnection(
         message.trim(),
-        conversationId,
+        effectiveConvId,
         handlers,
         abortController.signal
       );
@@ -155,13 +179,14 @@ export function useSSEChat(): UseSSEChatReturn {
         console.debug('[SSE] Connection aborted by user');
         return;
       }
-      
+
       const errorMessage = err instanceof Error ? err.message : '发送消息失败';
       setError(errorMessage);
       setIsLoading(false);
+      isLoadingRef.current = false;
       abortControllerRef.current = null;
     }
-  }, [isLoading, closeConnection]);
+  }, [closeConnection]);
 
   // 中止当前的流式输出
   const abortStream = useCallback(async () => {
@@ -189,12 +214,15 @@ export function useSSEChat(): UseSSEChatReturn {
       console.warn('[Abort] Missing messageId, cannot call backend abort API');
     }
 
-    // 将当前已接收的内容添加到消息列表
+    // 将当前已接收的内容添加到消息列表（带上 messageId 和 conversationId）
     if (streamingBufferRef.current || streamingReasoningBufferRef.current) {
+      const currentConvId = conversationIdRef.current; // 从 ref 中读取当前 conversationId
       const assistantMessage: Message = {
         role: 'assistant',
         content: streamingBufferRef.current,
         reasoning: streamingReasoningBufferRef.current || undefined,
+        id: messageIdRef.current ? parseInt(messageIdRef.current, 10) || undefined : undefined,
+        conversationId: currentConvId || undefined,
       };
       setMessages((prev) => [...prev, assistantMessage]);
     }
@@ -204,10 +232,11 @@ export function useSSEChat(): UseSSEChatReturn {
     streamingBufferRef.current = '';
     streamingReasoningBufferRef.current = '';
     setIsLoading(false);
+    isLoadingRef.current = false;
     setError(null);
     messageIdRef.current = null;
     setMessageId(null);
-  }, []);
+  }, [closeConnection]);
 
   // 清空所有消息
   const clearMessages = useCallback(() => {
@@ -231,7 +260,9 @@ export function useSSEChat(): UseSSEChatReturn {
     streamingReasoningBufferRef.current = '';
     setError(null);
     setIsLoading(false);
+    isLoadingRef.current = false;
     setConversationId(null);
+    conversationIdRef.current = null;
     setMessageId(null);
     messageIdRef.current = null;
     abortControllerRef.current = null;
@@ -275,9 +306,12 @@ export function useSSEChat(): UseSSEChatReturn {
     setError(null);
     setMessageId(messageId);
     messageIdRef.current = messageId;
+    conversationIdRef.current = conversationId;
+    setConversationId(conversationId);
 
     // 设置加载状态
     setIsLoading(true);
+    isLoadingRef.current = true;
 
     // 创建 SSE 处理器
     const handlers: SSEHandlers = {
@@ -290,6 +324,7 @@ export function useSSEChat(): UseSSEChatReturn {
       },
 
       onChunk: (content: string, _index: number) => {
+        if (!content) return;
         streamingBufferRef.current += content;
         flushSync(() => {
           setCurrentStreamingMessage(streamingBufferRef.current);
@@ -297,6 +332,7 @@ export function useSSEChat(): UseSSEChatReturn {
       },
 
       onReasoning: (reasoning: string, _index: number) => {
+        if (!reasoning) return;
         streamingReasoningBufferRef.current += reasoning;
         flushSync(() => {
           setCurrentStreamingReasoning(streamingReasoningBufferRef.current);
@@ -304,6 +340,7 @@ export function useSSEChat(): UseSSEChatReturn {
       },
 
       onConversationId: (newConversationId: number) => {
+        conversationIdRef.current = newConversationId;
         setConversationId(newConversationId);
         console.debug('[SSE Recover] Received conversationId:', newConversationId);
       },
@@ -316,6 +353,8 @@ export function useSSEChat(): UseSSEChatReturn {
             role: 'assistant',
             content: streamingBufferRef.current,
             reasoning: streamingReasoningBufferRef.current || undefined,
+            id: typeof data.messageId === 'string' ? parseInt(data.messageId, 10) || undefined : data.messageId,
+            conversationId: data.conversationId,
           };
           setMessages((prev) => [...prev, assistantMessage]);
         }
@@ -325,6 +364,7 @@ export function useSSEChat(): UseSSEChatReturn {
         streamingBufferRef.current = '';
         streamingReasoningBufferRef.current = '';
         setIsLoading(false);
+        isLoadingRef.current = false;
         abortControllerRef.current = null;
       },
 
@@ -332,6 +372,7 @@ export function useSSEChat(): UseSSEChatReturn {
         console.error('[SSE Recover] Error:', errorData.message);
         setError(errorData.message);
         setIsLoading(false);
+        isLoadingRef.current = false;
         abortControllerRef.current = null;
       },
     };
@@ -353,6 +394,7 @@ export function useSSEChat(): UseSSEChatReturn {
       const errorMessage = err instanceof Error ? err.message : '断线恢复失败';
       setError(errorMessage);
       setIsLoading(false);
+      isLoadingRef.current = false;
       abortControllerRef.current = null;
     }
   }, [closeConnection]);

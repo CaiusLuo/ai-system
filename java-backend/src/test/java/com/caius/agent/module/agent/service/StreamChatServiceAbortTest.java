@@ -142,15 +142,18 @@ class StreamChatServiceAbortTest {
 
         when(conversationOwnershipService.requireOwnedConversation(100L, 7L)).thenReturn(conversation);
         when(cacheKeyFactory.streamChunks(7L, 100L, "message-1")).thenReturn("user:7:stream:100:message-1");
-        when(redisTemplate.opsForStream()).thenReturn(streamOperations);
-        when(streamOperations.read(any(StreamOffset.class))).thenReturn(records);
-        when(objectMapper.readTree(any(String.class)))
-                .thenReturn(new ObjectMapper().readTree("{\"type\":\"chunk\",\"content\":\"hi\"}"));
+        when(redisTemplate.hasKey("user:7:stream:100:message-1")).thenReturn(true);
+
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.RedisCallback<List<MapRecord<String, Object, Object>>> callback =
+                any(org.springframework.data.redis.core.RedisCallback.class);
+        when(redisTemplate.execute(callback)).thenReturn(records);
 
         streamChatService.recoverChunks(7L, 100L, "message-1", null, new SseEmitter());
 
         verify(conversationOwnershipService).requireOwnedConversation(100L, 7L);
         verify(cacheKeyFactory).streamChunks(7L, 100L, "message-1");
-        verify(streamOperations).read(eq(StreamOffset.fromStart("user:7:stream:100:message-1")));
+        verify(redisTemplate).hasKey("user:7:stream:100:message-1");
+        verify(redisTemplate).execute(any(org.springframework.data.redis.core.RedisCallback.class));
     }
 }

@@ -28,6 +28,11 @@ public class Message {
      */
     private String title;
 
+    /**
+     * 流式状态：streaming / completed / error / aborted
+     */
+    private String streamingStatus;
+
     @TableLogic
     private Integer deleted;
 

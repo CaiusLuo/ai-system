@@ -249,8 +249,11 @@ export function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers)
       handlers.onReasoning?.(reasoningContent, (eventData as SSEChunkData).index);
     }
 
-    // 处理正式回复内容
-    handlers.onChunk?.((eventData as SSEChunkData).content, (eventData as SSEChunkData).index);
+    // 处理正式回复内容 — 过滤掉 undefined/null/空字符串，防止 "" + undefined → "undefined"
+    const content = (eventData as SSEChunkData).content;
+    if (content) {
+      handlers.onChunk?.(content, (eventData as SSEChunkData).index);
+    }
 
     // 提取 conversationId（首次响应时）
     if ((eventData as SSEChunkData).conversationId) {

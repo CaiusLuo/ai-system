@@ -115,6 +115,7 @@ class JobAgentGraph:
         conversation_id: int,
         system_prompt: str = "",
         message_id: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """
         执行 Agent 工作流（流式）
@@ -139,13 +140,17 @@ class JobAgentGraph:
         Raises:
             GeneratorExit: 当检测到 abort 时抛出，通知调用方中断
         """
-        abort_key = message_id or conversation_id
+        abort_key = message_id or str(conversation_id)
+
+        log_extra = f"abortKey={abort_key} | conversationId={conversation_id}"
+        if request_id:
+            log_extra = f"requestId={request_id} | {log_extra}"
+        if message_id:
+            log_extra = f"messageId={message_id} | {log_extra}"
 
         logger.info(
-            f"开始流式执行 Agent 工作流 | "
-            f"abort_key={abort_key} | "
-            f"conversation_id={conversation_id} | "
-            f"message_length={len(user_message)}"
+            f"开始流式执行 Agent 工作流 | {log_extra} | "
+            f"messageLength={len(user_message)}"
         )
 
         # 1. 获取历史消息（简化处理，暂不获取）
@@ -162,13 +167,13 @@ class JobAgentGraph:
         async for event in self._llm_gateway.stream_generate(messages):
             # 检查是否被中断
             if self._abort_controller and self._abort_controller.is_aborted(abort_key):
-                logger.warning(f"流式生成被中断 | abort_key={abort_key}")
+                logger.warning(f"流式生成被中断 | {log_extra}")
                 self._abort_controller.clear(abort_key)
-                return  # 停止生成
+                raise GeneratorExit("Stream aborted by client")
 
             yield event
 
-        logger.info(f"流式 Agent 工作流执行完成 | abort_key={abort_key}")
+        logger.info(f"流式 Agent 工作流执行完成 | {log_extra}")
 
     @staticmethod
     def _build_messages_for_stream(

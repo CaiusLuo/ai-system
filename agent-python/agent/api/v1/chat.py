@@ -6,6 +6,7 @@
 """
 import logging
 from collections.abc import AsyncGenerator
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -13,7 +14,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ...application.agent.graph import JobAgentGraph
 from ...core.abort import AbortController
 from ...core.exceptions import LLMServiceError
-from ...core.sse import create_chunk_event, create_done_event, create_error_event, create_ping_event
+from ...core.sse import (
+    create_chunk_event,
+    create_done_event,
+    create_error_event,
+    create_ping_event,
+    create_start_event,
+)
 from ...schemas.chat import AbortRequest, ChatRequest, ChatResponse, ChatStreamRequest
 
 logger = logging.getLogger(__name__)
@@ -74,13 +81,21 @@ async def chat_stream(
     每生成一个 token chunk 就立即推送给客户端
 
     SSE 数据格式：
-        event: message
-        id: 0
-        data: {"type":"chunk","content":"你","index":0,"timestamp":...}
+        event: start
+        id: start
+        data: {"type":"start","requestId":"...","userId":1,"conversationId":123,"messageId":"msg-...","timestamp":...}
+
+        event: chunk
+        id: chunk-0
+        data: {"type":"chunk","requestId":"...","userId":1,"conversationId":123,"messageId":"msg-...","content":"你","index":0}
 
         event: done
-        id: final
-        data: {"type":"done","content":"","conversation_id":1,...}
+        id: done
+        data: {"type":"done","requestId":"...","userId":1,"conversationId":123,"messageId":"msg-...","contentLength":150,"chunkCount":42,"timestamp":...}
+
+        event: error
+        id: error
+        data: {"type":"error","requestId":"...","userId":1,"conversationId":123,"messageId":"msg-...","message":"...","errorCode":"...","timestamp":...}
     """
     return StreamingResponse(
         _stream_generator(request, graph),
@@ -100,27 +115,44 @@ async def _stream_generator(
     """
     SSE 流式生成器
 
-    对齐对接文档：消费 Agent 的流式执行结果，
-    将每个 token chunk 格式化为标准化 SSE 协议数据。
-
-    支持：
-    - chunk 事件：content + reasoning（可选）
-    - done 事件：info + conversation_id
-    - error 事件：message
-    - ping 事件：心跳（定时发送）
+    核心保证：
+    1. 所有 chunk 绑定相同的 messageId / conversationId / userId / requestId
+    2. 流式开始先发送 start 事件，Java 可提前建立消息映射
+    3. 正常结束发送 done 事件，携带 contentLength / chunkCount 供校验
+    4. 异常/中断发送 error 事件，同样绑定完整上下文
+    5. finally 中清理 abort flag，防止内存泄漏和误中断
     """
     import asyncio
+
+    # 生成或使用传入的 messageId / requestId
+    message_id = request.message_id or f"msg-{uuid4().hex[:12]}"
+    request_id = request.request_id or f"req-{uuid4().hex[:8]}"
 
     index = 0
     full_content = ""
     last_ping_time = 0
 
+    logger.info(
+        f"开始流式生成 | requestId={request_id} | messageId={message_id} | "
+        f"userId={request.user_id} | conversationId={request.conversation_id}"
+    )
+
     try:
+        # 1. 先发送 start 事件，让 Java 建立消息映射
+        yield create_start_event(
+            request_id=request_id,
+            user_id=request.user_id,
+            conversation_id=request.conversation_id,
+            message_id=message_id,
+        )
+
+        # 2. 流式调用 Agent
         async for event in graph.execute_stream(
             user_message=request.message,
             user_id=request.user_id,
             conversation_id=request.conversation_id,
-            message_id=request.session_id,  # 使用 session_id 作为 message_id（用于 abort）
+            message_id=message_id,
+            request_id=request_id,
         ):
             # 检查是否需要发送 ping 心跳（每 15 秒）
             current_time = asyncio.get_event_loop().time()
@@ -128,34 +160,71 @@ async def _stream_generator(
                 yield create_ping_event()
                 last_ping_time = current_time
 
-            # event 是 dict：{"content": str, "reasoning": str|None}
             content = event.get("content", "")
             reasoning = event.get("reasoning")
 
-            # 格式化为 SSE 事件
             yield create_chunk_event(
                 content=content,
-                conversation_id=request.conversation_id,
                 index=index,
+                request_id=request_id,
+                user_id=request.user_id,
+                conversation_id=request.conversation_id,
+                message_id=message_id,
                 reasoning=reasoning,
             )
             full_content += content
             index += 1
 
-        # 发送完成事件
+        # 3. 发送完成事件
         yield create_done_event(
+            request_id=request_id,
+            user_id=request.user_id,
             conversation_id=request.conversation_id,
+            message_id=message_id,
             info="对话完成",
+            content_length=len(full_content),
+            chunk_count=index,
+        )
+
+        logger.info(
+            f"流式生成完成 | requestId={request_id} | messageId={message_id} | "
+            f"chunks={index} | content_length={len(full_content)}"
         )
 
     except GeneratorExit:
-        # 被中断
-        logger.warning(f"流式生成被中断 | conversation_id={request.conversation_id}")
-        yield create_error_event(message="生成已中断", index=index)
+        # 被客户端断开连接中断
+        logger.warning(
+            f"流式生成被中断（客户端断开） | requestId={request_id} | messageId={message_id}"
+        )
+        yield create_error_event(
+            message="生成已中断",
+            request_id=request_id,
+            user_id=request.user_id,
+            conversation_id=request.conversation_id,
+            message_id=message_id,
+            index=index,
+            error_code="ABORTED",
+        )
 
     except Exception as e:
-        logger.error(f"流式接口处理失败: {e}", exc_info=True)
-        yield create_error_event(message="流式回复生成失败", index=index)
+        logger.error(
+            f"流式生成异常 | requestId={request_id} | messageId={message_id} | error={e}",
+            exc_info=True,
+        )
+        yield create_error_event(
+            message="流式回复生成失败",
+            request_id=request_id,
+            user_id=request.user_id,
+            conversation_id=request.conversation_id,
+            message_id=message_id,
+            index=index,
+            error_code="STREAM_ERROR",
+        )
+
+    finally:
+        # 4. 确保清理 abort flag，防止内存泄漏和后续请求误中断
+        if graph._abort_controller:
+            graph._abort_controller.clear(message_id)
 
 
 def _generate_title(content: str) -> str:
@@ -198,8 +267,7 @@ async def chat_stream_abort(
 
     前端调用此接口后，正在进行的流式生成会在下一个 chunk 检查时停止。
     """
-    # 使用 message_id 作为 abort key（兼容 conversation_id）
     abort_key = request.message_id
     abort_controller.abort(abort_key)
-    logger.info(f"收到中断请求 | message_id={abort_key}")
+    logger.info(f"收到中断请求 | messageId={abort_key}")
     return JSONResponse(content={"message": "已发送中断信号"})

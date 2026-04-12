@@ -188,42 +188,57 @@ Authorization: Bearer <TOKEN>
 
 所有事件的 `data` 字段均为 **JSON 字符串**，需 `JSON.parse()` 解析。
 
+> **v2 协议（2026-04-12）**：Python Agent 端已升级，所有事件统一使用 camelCase 命名，
+> 每个事件必带 `messageId`、`userId`、`requestId`。新增 `start` 事件。
+
 ```typescript
 interface SSEChunkData {
-  type: 'chunk' | 'done' | 'error' | 'ping' | 'message_id';
-  content: string;
-  index: number;
+  type: 'start' | 'chunk' | 'done' | 'error' | 'ping' | 'message_id';
+  // ⭐ v2 全链路追踪字段（每个事件必带）
+  messageId: string;
+  requestId: string;
+  userId: number;
+  conversationId: number;
+  // 事件特有字段
+  content?: string;
+  index?: number;
   reasoning?: string;
   info?: string;
-  conversationId?: number;
-  messageId?: string;  // ⭐ message_id 事件和 done 事件中返回
+  contentLength?: number;    // v2 done 事件
+  chunkCount?: number;       // v2 done 事件
+  errorCode?: string;        // v2 error 事件
+  timestamp?: number;        // v2 start/done/error 事件
 }
 ```
 
 | 事件类型 | data 结构 | 说明 | 前端处理 |
 |---------|-----------|------|---------|
-| `message_id` | `{ messageId: "UUID" }` | ⭐ **消息ID（首个事件）** | **立即保存，用于 abort** |
-| `chunk` | `{ type, content, index, reasoning? }` | AI 回复片段 | 打字机输出 |
-| `done`  | `{ type, info, conversationId, messageId }` | 完成 ⭐含 messageId | 保存 messageId |
-| `error` | `{ type, message }` | 错误 | 显示错误 |
+| `message_id` | `{ messageId: "UUID" }` | ⭐ **消息ID（首个事件，Java 端发送）** | **立即保存，用于 abort** |
+| `start`  | `{ type, messageId, requestId, userId, conversationId, timestamp }` | v2 新增：Python 确认流式开始 | 日志记录 |
+| `chunk` | `{ type, messageId, content, index, reasoning? }` | AI 回复片段 | 打字机输出 |
+| `done`  | `{ type, messageId, info, contentLength, chunkCount, timestamp }` | 完成 | 完整性校验 |
+| `error` | `{ type, messageId, message, errorCode }` | 错误 | 区分 ABORTED（正常）vs STREAM_ERROR（异常） |
 | `ping`  | `{ type }` | 心跳（30s） | 忽略 |
 
-**完整示例：**
+**完整示例（v2）：**
 ```
 event: message_id
 data: {"messageId":"550e8400-e29b-41d4-a716-446655440000"}
 
-event: chunk
-id: chunk-0
-data: {"type":"chunk","content":"你","index":0}
+event: start
+data: {"type":"start","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"messageId":"550e8400-e29b-41d4-a716-446655440000","timestamp":1712908800000}
 
 event: chunk
-id: chunk-1
-data: {"type":"chunk","content","好","index":1}
+id: chunk-550e8400-e29b-41d4-a716-446655440000
+data: {"type":"chunk","messageId":"550e8400-e29b-41d4-a716-446655440000","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"content":"你","index":0}
+
+event: chunk
+id: chunk-550e8400-e29b-41d4-a716-446655440000
+data: {"type":"chunk","messageId":"550e8400-e29b-41d4-a716-446655440000","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"content","好","index":1}
 
 event: done
-id: done-2
-data: {"type":"done","info":"对话完成","conversationId":123,"messageId":"550e8400-e29b-41d4-a716-446655440000"}
+id: done-550e8400-e29b-41d4-a716-446655440000
+data: {"type":"done","messageId":"550e8400-e29b-41d4-a716-446655440000","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"contentLength":2,"chunkCount":2,"info":"对话完成","timestamp":1712908805000}
 ```
 
 **重要说明：**

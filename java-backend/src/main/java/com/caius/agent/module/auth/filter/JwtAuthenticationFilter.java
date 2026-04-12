@@ -40,6 +40,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Value("${jwt.prefix}")
     private String tokenPrefix;
 
+    /**
+     * ⭐ 修复：跳过 async dispatch 和 error dispatch，避免 SSE 异步回调和错误转发时重复执行 JWT 认证。
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return true;
+    }
+
+    @Override
+    protected boolean shouldNotFilterErrorDispatch() {
+        return true;
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,

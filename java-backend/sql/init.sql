@@ -43,11 +43,13 @@ CREATE TABLE IF NOT EXISTS `message` (
     `role` VARCHAR(20) NOT NULL COMMENT '角色：user / assistant / system',
     `content` TEXT NOT NULL COMMENT '消息内容',
     `title` VARCHAR(500) DEFAULT NULL COMMENT 'Agent 总结信息',
+    `streaming_status` VARCHAR(20) DEFAULT NULL COMMENT '流式状态：streaming / completed / error / aborted',
     `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0-未删除，1-已删除',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    KEY `idx_user_conversation_created_at` (`user_id`, `conversation_id`, `created_at`)
+    KEY `idx_user_conversation_created_at` (`user_id`, `conversation_id`, `created_at`),
+    KEY `idx_conversation_role` (`conversation_id`, `role`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
 
 -- 插入测试数据（密码为：admin123，使用 BCrypt 加密）

@@ -66,13 +66,14 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public List<MessageDTO> getMessages(Long conversationId, Long userId) {
+        // ⭐ 修复 BUG-4：先校验 ownership，再按 conversationId 查所有消息
+        // assistant 消息的 userId 与 conversation 的 ownerId 一致
+        // 不再额外按 userId 过滤 message 表（避免数据不一致时消息"消失"）
         conversationOwnershipService.requireOwnedConversation(conversationId, userId);
 
-        // 获取消息列表
         List<Message> messages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
                         .eq(Message::getConversationId, conversationId)
-                        .eq(Message::getUserId, userId)
                         .orderByAsc(Message::getCreatedAt)
         );
 

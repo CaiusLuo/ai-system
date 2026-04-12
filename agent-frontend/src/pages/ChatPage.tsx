@@ -122,12 +122,12 @@ export default function ChatPage() {
     }
   }, [getCurrentConvId, getCurrentConversation]);
 
-  // 当 remoteMessages 更新时，同步到 localMessages
+  // 当 remoteMessages 更新时，同步到 localMessages（流式传输中不覆盖，避免丢失流式内容）
   useEffectHook(() => {
-    if (hasLoadedFromBackend && remoteMessages.length > 0) {
+    if (hasLoadedFromBackend && remoteMessages.length > 0 && !isLoading) {
       setLocalMessages(remoteMessages);
     }
-  }, [remoteMessages, hasLoadedFromBackend]);
+  }, [remoteMessages, hasLoadedFromBackend, isLoading]);
 
   // 流式输出完成时保存消息到本地
   useEffectHook(() => {
@@ -201,6 +201,7 @@ export default function ChatPage() {
       createConversation();
       setLocalMessages([]);
       setHasLoadedFromBackend(false);
+      resetChatState();
       refreshLocalConvList();
     } else {
       clearMessages();
@@ -214,6 +215,9 @@ export default function ChatPage() {
 
     setIsSwitchingConversation(true);
     setHasLoadedFromBackend(false);
+
+    // 清理旧的流状态和 SSE 连接
+    resetChatState();
 
     try {
       switchConversation(id as string);
@@ -249,7 +253,7 @@ export default function ChatPage() {
     }
 
     setIsMobileSidebarOpen(false);
-  }, [isLoading, switchConversation, loadConversation]);
+  }, [isLoading, switchConversation, loadConversation, resetChatState]);
 
   // 删除本地对话
   const handleDeleteConversation = async (id: number | string) => {
@@ -316,21 +320,25 @@ export default function ChatPage() {
   const displayMessages = useMemo<Message[]>(() => {
     const baseMessages = [...localMessages];
 
-    if (currentStreamingMessage || currentStreamingReasoning) {
+    // 只有当有实际内容时才追加/更新流式消息，防止 undefined 被渲染
+    const streamingContent = currentStreamingMessage || '';
+    const reasoningContent = currentStreamingReasoning || '';
+
+    if (streamingContent || reasoningContent) {
       const lastMsg = baseMessages[baseMessages.length - 1];
       const hasStreamingAssistant = lastMsg && lastMsg.role === 'assistant' && isLoading;
 
       if (hasStreamingAssistant) {
         baseMessages[baseMessages.length - 1] = {
           ...lastMsg,
-          content: currentStreamingMessage,
-          reasoning: currentStreamingReasoning || lastMsg.reasoning,
+          content: streamingContent,
+          reasoning: reasoningContent || lastMsg.reasoning,
         };
       } else {
         baseMessages.push({
           role: 'assistant',
-          content: currentStreamingMessage,
-          reasoning: currentStreamingReasoning || undefined,
+          content: streamingContent,
+          reasoning: reasoningContent || undefined,
         });
       }
     }
@@ -482,19 +490,27 @@ export default function ChatPage() {
                   key={idx}
                   message={msg}
                   isStreaming={idx === displayMessages.length - 1 && isLoading}
-                  agentName={agentName}
                 />
               ))}
 
-              {/* 加载指示器（极简） */}
-              {isLoading && currentStreamingMessage === '' && (
+              {/* 加载指示器：agent 头像上下浮动 */}
+              {isLoading && !currentStreamingMessage && (
                 <div className="max-w-3xl mx-auto px-4 py-6">
-                  <div className="flex items-center gap-2 text-sm text-gray-400 dark:text-gray-500">
-                    <div className="flex gap-1">
-                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '0ms' }} />
-                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '200ms' }} />
-                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-[typing_1s_ease-in-out_infinite]" style={{ animationDelay: '400ms' }} />
+                  <div className="flex items-center gap-3">
+                    <div className="animate-[bounce_1.5s_ease-in-out_infinite]">
+                      <svg className="w-7 h-7" viewBox="0 0 32 32" fill="none">
+                        <rect width="32" height="32" rx="16" fill="#E5E7EB" />
+                        <g transform="translate(4, 4)">
+                          <rect x="3" y="6" width="18" height="14" rx="4" fill="#6B7280" />
+                          <circle cx="9" cy="13" r="1.5" fill="white" />
+                          <circle cx="15" cy="13" r="1.5" fill="white" />
+                          <path d="M9 16.5 Q12 18.5 15 16.5" stroke="white" strokeWidth="1.2" strokeLinecap="round" />
+                          <rect x="10" y="1" width="4" height="5" rx="2" fill="#6B7280" />
+                          <circle cx="12" cy="1" r="1.2" fill="#9CA3AF" />
+                        </g>
+                      </svg>
                     </div>
+                    <span className="text-sm text-gray-400 dark:text-gray-500">正在思考...</span>
                   </div>
                 </div>
               )}
