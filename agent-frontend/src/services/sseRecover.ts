@@ -66,8 +66,21 @@ export async function recoverSSEConnection(
       return;
     }
 
-    const errorMessage = error instanceof Error ? error.message : 'Network error';
-    handlers.onError?.({ type: 'error', message: `恢复连接失败: ${errorMessage}` });
+    let errorMessage = '恢复连接失败';
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      errorMessage = '网络连接失败，请检查网络后重试';
+    } else if (error instanceof DOMException && error.name === 'AbortError') {
+      console.debug('[SSE Recover] Request aborted by signal');
+      return;
+    } else if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('network') || msg.includes('connection') || msg.includes('reset')) {
+        errorMessage = '网络连接中断，请重试';
+      } else {
+        errorMessage = `恢复连接失败: ${error.message}`;
+      }
+    }
+    handlers.onError?.({ type: 'error', message: errorMessage });
     return;
   }
 
@@ -105,5 +118,7 @@ export async function recoverSSEConnection(
   }
 
   // 读取流式数据
-  await readSSEStream(response, handlers, signal);
+  await readSSEStream(response, handlers, signal, {
+    heartbeatTimeout: 120_000,
+  });
 }

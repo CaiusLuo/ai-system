@@ -175,6 +175,8 @@ export async function login(params: LoginParams): Promise<ApiResponse<LoginRespo
 // 登出
 export function logout(): void {
   removeToken();
+  // 清理业务状态
+  localStorage.removeItem('agent_name');
 }
 
 // 获取用户信息

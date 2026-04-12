@@ -70,13 +70,23 @@ export function parseSSEBlock(block: string): SSEEventData | null {
 
 /**
  * 读取和处理 SSE 流式数据（通用函数）
+ *
+ * 状态机：
+ *   streaming → done     → 正常结束（收到 done 事件）
+ *   streaming → error    → 服务端报错（收到 error 事件）
+ *   streaming → closed   → 服务器关闭连接（reader.done），正常结束
+ *   streaming → aborted  → 用户主动中断
+ *   streaming → timeout  → 超时错误
  */
 export async function readSSEStream(
   response: Response,
   handlers: SSEHandlers,
-  signal: AbortSignal
+  signal: AbortSignal,
+  options?: {
+    /** 心跳超时时间（ms），超过此时间未收到任何数据则报错，默认 120s */
+    heartbeatTimeout?: number;
+  }
 ): Promise<void> {
-  // 检查 response body
   if (!response.body) {
     handlers.onError?.({ type: 'error', message: '服务器未返回流式数据' });
     return;
@@ -85,53 +95,115 @@ export async function readSSEStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let terminalEventReceived = false;
+  const heartbeatTimeout = options?.heartbeatTimeout ?? 120_000;
+  let lastDataTime = Date.now();
+  let settled = false; // 是否已经以 done/error 结算
+
+  // 心跳超时定时器
+  const heartbeatTimer = setInterval(() => {
+    if (!settled && Date.now() - lastDataTime > heartbeatTimeout) {
+      clearInterval(heartbeatTimer);
+      settled = true;
+      handlers.onError?.({
+        type: 'error',
+        message: '连接超时，服务器长时间未返回数据，请重试',
+      });
+      reader.cancel();
+    }
+  }, Math.min(heartbeatTimeout, 30_000));
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      // 带超时的 read：超时直接抛出明确的 timeout 错误
+      const { done, value } = await withTimeout(
+        reader.read(),
+        heartbeatTimeout,
+        '读取流式数据超时'
+      );
 
       if (done) {
-        // 处理剩余的 buffer
+        // 服务器主动关闭连接，正常结束
+        // 处理 buffer 中最后一个可能不完整的块
         if (buffer.trim()) {
           const eventData = parseSSEBlock(buffer);
           if (eventData) {
-            terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
+            settled = dispatchSSEEvent(eventData, handlers) || settled;
           }
         }
-        console.debug('[SSE] Stream ended');
-        if (!signal.aborted && !terminalEventReceived) {
-          handlers.onError?.({ type: 'error', message: '连接意外中断，请重试' });
+
+        // 如果尚未结算（没收到 done/error 事件），调用 onDone 完成结算
+        // 服务器关闭连接本身就是正常结束，不应报错
+        if (!settled) {
+          settled = true;
+          handlers.onDone?.({ type: 'done', conversationId: 0, messageId: '', info: '' });
         }
+
+        console.debug('[SSE] Stream closed by server');
         break;
       }
 
-      // 解码数据块
+      // 收到数据，刷新心跳
+      lastDataTime = Date.now();
+
       const chunk = decoder.decode(value, { stream: true });
       buffer += chunk;
 
-      // 按 SSE 标准分隔符 \n\n 分割事件块
+      // 按 \n\n 分割事件块
       const blocks = buffer.split('\n\n');
-      // 保留最后一个可能不完整的块
       buffer = blocks.pop() || '';
 
       for (const block of blocks) {
         const eventData = parseSSEBlock(block);
-        if (!eventData) {
-          continue;
-        }
-        terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
+        if (!eventData) continue;
+        settled = dispatchSSEEvent(eventData, handlers) || settled;
       }
     }
   } catch (error) {
+    clearInterval(heartbeatTimer);
+
     if (signal.aborted) {
       console.debug('[SSE] Stream aborted');
       return;
     }
 
-    const errorMessage = error instanceof Error ? error.message : '读取流式数据失败';
+    // 超时错误已有友好提示，直接透传
+    if (error instanceof Error && error.message === '读取流式数据超时') {
+      handlers.onError?.({
+        type: 'error',
+        message: '连接超时，服务器长时间未返回数据，请重试',
+      });
+      return;
+    }
+
+    // 其他读取错误
+    let errorMessage = '读取流式数据失败';
+    if (error instanceof TypeError) {
+      errorMessage = '网络连接异常，请检查网络后重试';
+    } else if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('network') || msg.includes('connection') || msg.includes('reset')) {
+        errorMessage = '网络连接中断，请重试';
+      } else {
+        errorMessage = error.message;
+      }
+    }
     handlers.onError?.({ type: 'error', message: errorMessage });
+  } finally {
+    clearInterval(heartbeatTimer);
   }
+}
+
+/**
+ * 给 Promise 加超时，超时后抛出明确错误
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
 }
 
 /**
@@ -185,9 +257,24 @@ export async function createSSEConnection(
       console.debug('[SSE] Request aborted');
       return;
     }
-    
-    const errorMessage = error instanceof Error ? error.message : 'Network error';
-    handlers.onError?.({ type: 'error', message: `连接失败: ${errorMessage}` });
+
+    // 细化网络错误诊断
+    let errorMessage = '连接失败';
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      // 常见于 CORS、网络断开、DNS 解析失败
+      errorMessage = '网络连接失败，请检查网络后重试';
+    } else if (error instanceof DOMException && error.name === 'AbortError') {
+      console.debug('[SSE] Request aborted by signal');
+      return;
+    } else if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('network') || msg.includes('connection') || msg.includes('reset')) {
+        errorMessage = '网络连接中断，请重试';
+      } else {
+        errorMessage = `连接失败: ${error.message}`;
+      }
+    }
+    handlers.onError?.({ type: 'error', message: errorMessage });
     return;
   }
 
@@ -228,7 +315,9 @@ export async function createSSEConnection(
   }
 
   // 读取流式数据
-  await readSSEStream(response, handlers, signal);
+  await readSSEStream(response, handlers, signal, {
+    heartbeatTimeout: 120_000, // 120 秒无数据则超时
+  });
 }
 
 /**
