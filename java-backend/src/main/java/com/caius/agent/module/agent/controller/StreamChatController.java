@@ -8,7 +8,6 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -32,10 +31,9 @@ public class StreamChatController {
      * 或者通过其他方式获取（后续可在 done 事件中返回）
      */
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamChat(@AuthenticationPrincipal Long userId,
-                                 @Valid @RequestBody StreamChatRequest request) {
-        log.info("[流式接口] 收到流式请求, userId={}, message={}", userId, request.getMessage());
-        return streamChatService.streamChat(userId, request);
+    public SseEmitter streamChat(@Valid @RequestBody StreamChatRequest request) {
+        log.info("[流式接口] 收到流式请求, message={}", request.getMessage());
+        return streamChatService.streamChat(request);
     }
 
     /**

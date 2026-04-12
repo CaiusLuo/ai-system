@@ -11,5 +11,5 @@ public interface AgentService {
     /**
      * 聊天对话
      */
-    ChatResponse chat(Long userId, ChatRequest request);
+    ChatResponse chat(ChatRequest request);
 }

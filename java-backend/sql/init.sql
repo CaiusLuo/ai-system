@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS `conversation` (
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_user_id` (`user_id`),
+    KEY `idx_user_created_at` (`user_id`, `created_at`),
+    KEY `idx_user_updated_at` (`user_id`, `updated_at`),
     KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话表';
 
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS `message` (
     PRIMARY KEY (`id`),
     KEY `idx_conversation_id` (`conversation_id`),
     KEY `idx_user_id` (`user_id`),
+    KEY `idx_user_conversation_created_at` (`user_id`, `conversation_id`, `created_at`),
     KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
 

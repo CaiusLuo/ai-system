@@ -1,7 +1,9 @@
 package com.caius.agent.module.conversation.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
 import com.caius.agent.common.exception.BusinessException;
+import com.caius.agent.common.security.CurrentUserProvider;
 import com.caius.agent.dao.ConversationMapper;
 import com.caius.agent.dao.MessageMapper;
 import com.caius.agent.dao.UserMapper;
@@ -9,6 +11,7 @@ import com.caius.agent.module.conversation.dto.ConversationDTO;
 import com.caius.agent.module.conversation.dto.MessageDTO;
 import com.caius.agent.module.conversation.entity.Conversation;
 import com.caius.agent.module.conversation.entity.Message;
+import com.caius.agent.module.conversation.service.ConversationOwnershipService;
 import com.caius.agent.module.conversation.service.ConversationService;
 import com.caius.agent.module.user.entity.User;
 import lombok.RequiredArgsConstructor;
@@ -32,12 +35,14 @@ public class ConversationServiceImpl implements ConversationService {
     private final MessageMapper messageMapper;
     private final UserMapper userMapper;
     private final StringRedisTemplate redisTemplate;
-
-    private static final String CONVERSATION_CACHE_KEY = "conversation:messages:";
+    private final CurrentUserProvider currentUserProvider;
+    private final ConversationOwnershipService conversationOwnershipService;
+    private final UserScopedCacheKeyFactory cacheKeyFactory;
 
     @Override
-    public List<ConversationDTO> getConversations(Long userId) {
-        // 获取会话列表
+    public List<ConversationDTO> getConversations() {
+        Long userId = currentUserProvider.requireCurrentUserId();
+
         List<Conversation> conversations = conversationMapper.selectList(
                 new LambdaQueryWrapper<Conversation>()
                         .eq(Conversation::getUserId, userId)
@@ -48,32 +53,26 @@ public class ConversationServiceImpl implements ConversationService {
             return Collections.emptyList();
         }
 
-        // 批量获取每个会话的最新消息（一次查询）
         List<Long> conversationIds = conversations.stream()
                 .map(Conversation::getId)
                 .collect(Collectors.toList());
 
-        // 查询每个会话的最新消息
-        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(conversationIds);
+        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(userId, conversationIds);
 
-        // 转换为 DTO
         return conversations.stream()
                 .map(conversation -> convertToConversationDTO(conversation, latestMessageMap.get(conversation.getId())))
                 .collect(Collectors.toList());
     }
 
     @Override
-    public List<MessageDTO> getMessages(Long conversationId, Long userId) {
-        // 验证会话权限
-        Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !conversation.getUserId().equals(userId)) {
-            throw new BusinessException("会话不存在或无权限访问");
-        }
+    public List<MessageDTO> getMessages(Long conversationId) {
+        Long userId = currentUserProvider.requireCurrentUserId();
+        conversationOwnershipService.requireOwnedConversation(conversationId, userId);
 
-        // 获取消息列表
         List<Message> messages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
                         .eq(Message::getConversationId, conversationId)
+                        .eq(Message::getUserId, userId)
                         .orderByAsc(Message::getCreatedAt)
         );
 
@@ -81,7 +80,6 @@ public class ConversationServiceImpl implements ConversationService {
             return Collections.emptyList();
         }
 
-        // 批量获取所有用户信息（一次查询，避免 N+1 问题）
         List<Long> userIds = messages.stream()
                 .map(Message::getUserId)
                 .distinct()
@@ -89,39 +87,31 @@ public class ConversationServiceImpl implements ConversationService {
 
         Map<Long, User> userMap = batchGetUsers(userIds);
 
-        // 转换为 DTO（包含用户信息）
         return messages.stream()
                 .map(message -> convertToMessageDTO(message, userMap.get(message.getUserId())))
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 批量获取每个会话的最新消息
-     */
-    private Map<Long, Message> getLatestMessagesByConversationIds(List<Long> conversationIds) {
+    private Map<Long, Message> getLatestMessagesByConversationIds(Long userId, List<Long> conversationIds) {
         if (CollectionUtils.isEmpty(conversationIds)) {
             return Collections.emptyMap();
         }
 
-        // 查询所有会话的最新消息
         List<Message> latestMessages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
                         .in(Message::getConversationId, conversationIds)
+                        .eq(Message::getUserId, userId)
                         .orderByDesc(Message::getCreatedAt)
         );
 
-        // 按会话ID分组，取每个会话的第一条（最新）消息
         return latestMessages.stream()
                 .collect(Collectors.toMap(
                         Message::getConversationId,
                         message -> message,
-                        (existing, replacement) -> existing // 如果有重复，保留第一个
+                        (existing, replacement) -> existing
                 ));
     }
 
-    /**
-     * 批量获取用户信息
-     */
     private Map<Long, User> batchGetUsers(List<Long> userIds) {
         if (CollectionUtils.isEmpty(userIds)) {
             return Collections.emptyMap();
@@ -132,9 +122,6 @@ public class ConversationServiceImpl implements ConversationService {
                 .collect(Collectors.toMap(User::getId, user -> user));
     }
 
-    /**
-     * 转换为会话 DTO
-     */
     private ConversationDTO convertToConversationDTO(Conversation conversation, Message latestMessage) {
         return ConversationDTO.builder()
                 .id(conversation.getId())
@@ -147,9 +134,6 @@ public class ConversationServiceImpl implements ConversationService {
                 .build();
     }
 
-    /**
-     * 转换为消息 DTO
-     */
     private MessageDTO convertToMessageDTO(Message message, User user) {
         return MessageDTO.builder()
                 .id(message.getId())
@@ -165,17 +149,25 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
-    public void deleteConversation(Long conversationId, Long userId) {
-        // 验证会话权限
-        Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !conversation.getUserId().equals(userId)) {
-            throw new BusinessException("会话不存在或无权限删除");
+    public void deleteConversation(Long conversationId) {
+        Long userId = currentUserProvider.requireCurrentUserId();
+        conversationOwnershipService.requireOwnedConversation(conversationId, userId);
+
+        messageMapper.delete(
+                new LambdaQueryWrapper<Message>()
+                        .eq(Message::getConversationId, conversationId)
+                        .eq(Message::getUserId, userId)
+        );
+
+        int deleted = conversationMapper.delete(
+                new LambdaQueryWrapper<Conversation>()
+                        .eq(Conversation::getId, conversationId)
+                        .eq(Conversation::getUserId, userId)
+        );
+        if (deleted == 0) {
+            throw new BusinessException(403, "无权删除该会话");
         }
 
-        // 逻辑删除会话
-        conversationMapper.deleteById(conversationId);
-
-        // 清除 Redis 缓存
-        redisTemplate.delete(CONVERSATION_CACHE_KEY + conversationId);
+        redisTemplate.delete(cacheKeyFactory.conversationMessages(userId, conversationId));
     }
 }

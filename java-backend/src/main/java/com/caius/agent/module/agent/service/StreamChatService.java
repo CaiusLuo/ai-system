@@ -11,11 +11,10 @@ public interface StreamChatService {
     /**
      * 流式对话
      *
-     * @param userId 用户 ID
      * @param request 请求参数
      * @return SSE 发射器
      */
-    SseEmitter streamChat(Long userId, StreamChatRequest request);
+    SseEmitter streamChat(StreamChatRequest request);
 
     /**
      * 断线恢复：从 Redis 读取并 replay chunk

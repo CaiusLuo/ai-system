@@ -6,7 +6,6 @@ import com.caius.agent.module.agent.dto.ChatResponse;
 import com.caius.agent.module.agent.service.AgentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -20,9 +19,8 @@ public class AgentController {
     private final AgentService agentService;
 
     @PostMapping("/chat")
-    public Result<ChatResponse> chat(@AuthenticationPrincipal Long userId,
-                                     @Valid @RequestBody ChatRequest request) {
-        ChatResponse response = agentService.chat(userId, request);
+    public Result<ChatResponse> chat(@Valid @RequestBody ChatRequest request) {
+        ChatResponse response = agentService.chat(request);
         return Result.success(response);
     }
 }

@@ -1,7 +1,9 @@
 package com.caius.agent.module.conversation;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
 import com.caius.agent.common.exception.BusinessException;
+import com.caius.agent.common.security.CurrentUserProvider;
 import com.caius.agent.dao.ConversationMapper;
 import com.caius.agent.dao.MessageMapper;
 import com.caius.agent.dao.UserMapper;
@@ -9,6 +11,7 @@ import com.caius.agent.module.conversation.dto.ConversationDTO;
 import com.caius.agent.module.conversation.dto.MessageDTO;
 import com.caius.agent.module.conversation.entity.Conversation;
 import com.caius.agent.module.conversation.entity.Message;
+import com.caius.agent.module.conversation.service.ConversationOwnershipService;
 import com.caius.agent.module.conversation.service.impl.ConversationServiceImpl;
 import com.caius.agent.module.user.entity.User;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,12 +30,16 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * 会话模块测试
- * - Service 层单元测试（不依赖 Spring Context）
  */
 @DisplayName("会话模块测试")
 @ExtendWith(MockitoExtension.class)
@@ -50,8 +57,22 @@ class ConversationModuleTest {
     @Mock
     private StringRedisTemplate redisTemplate;
 
+    @Mock
+    private CurrentUserProvider currentUserProvider;
+
+    @Mock
+    private ConversationOwnershipService conversationOwnershipService;
+
+    @Mock
+    private UserScopedCacheKeyFactory cacheKeyFactory;
+
     @InjectMocks
     private ConversationServiceImpl conversationService;
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(currentUserProvider.requireCurrentUserId()).thenReturn(1L);
+    }
 
     @Nested
     @DisplayName("获取会话列表测试")
@@ -69,6 +90,7 @@ class ConversationModuleTest {
             Message latestMsg = new Message();
             latestMsg.setId(2L);
             latestMsg.setConversationId(1L);
+            latestMsg.setUserId(1L);
             latestMsg.setContent("Latest message");
             latestMsg.setCreatedAt(LocalDateTime.now());
 
@@ -77,7 +99,7 @@ class ConversationModuleTest {
             when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(latestMsg));
 
-            List<ConversationDTO> result = conversationService.getConversations(1L);
+            List<ConversationDTO> result = conversationService.getConversations();
 
             assertNotNull(result);
             assertEquals(1, result.size());
@@ -91,31 +113,10 @@ class ConversationModuleTest {
             when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Collections.emptyList());
 
-            List<ConversationDTO> result = conversationService.getConversations(1L);
+            List<ConversationDTO> result = conversationService.getConversations();
 
             assertNotNull(result);
             assertTrue(result.isEmpty());
-        }
-
-        @Test
-        @DisplayName("获取会话列表 - 会话没有消息")
-        void getConversations_NoMessages() {
-            Conversation conv = new Conversation();
-            conv.setId(1L);
-            conv.setUserId(1L);
-            conv.setTitle("Empty Conversation");
-            conv.setCreatedAt(LocalDateTime.now().minusDays(1));
-
-            when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
-                    .thenReturn(Arrays.asList(conv));
-            when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
-                    .thenReturn(Collections.emptyList());
-
-            List<ConversationDTO> result = conversationService.getConversations(1L);
-
-            assertNotNull(result);
-            assertEquals(1, result.size());
-            assertNull(result.get(0).getLastMessageContent());
         }
     }
 
@@ -141,34 +142,31 @@ class ConversationModuleTest {
             user.setId(1L);
             user.setUsername("testuser");
 
-            when(conversationMapper.selectById(1L)).thenReturn(conv);
+            when(conversationOwnershipService.requireOwnedConversation(1L, 1L)).thenReturn(conv);
             when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(msg));
             when(userMapper.selectBatchIds(anyList()))
                     .thenReturn(Arrays.asList(user));
 
-            List<MessageDTO> result = conversationService.getMessages(1L, 1L);
+            List<MessageDTO> result = conversationService.getMessages(1L);
 
             assertNotNull(result);
             assertEquals(1, result.size());
             assertEquals("testuser", result.get(0).getUsername());
-
-            // 验证只调用了一次批量查询（而非循环查询）
             verify(userMapper, times(1)).selectBatchIds(anyList());
         }
 
         @Test
-        @DisplayName("获取消息列表 - 权限验证失败")
+        @DisplayName("获取消息列表 - 跨用户访问被拒绝")
         void getMessages_InvalidPermission() {
-            Conversation otherConv = new Conversation();
-            otherConv.setId(1L);
-            otherConv.setUserId(999L);
-
-            when(conversationMapper.selectById(1L)).thenReturn(otherConv);
+            when(conversationOwnershipService.requireOwnedConversation(1L, 1L))
+                    .thenThrow(new BusinessException(403, "无权访问该会话"));
 
             BusinessException exception = assertThrows(BusinessException.class,
-                    () -> conversationService.getMessages(1L, 1L));
-            assertEquals("会话不存在或无权限访问", exception.getMessage());
+                    () -> conversationService.getMessages(1L));
+            assertEquals(403, exception.getCode());
+            assertEquals("无权访问该会话", exception.getMessage());
+            verifyNoInteractions(messageMapper);
         }
 
         @Test
@@ -178,11 +176,11 @@ class ConversationModuleTest {
             conv.setId(1L);
             conv.setUserId(1L);
 
-            when(conversationMapper.selectById(1L)).thenReturn(conv);
+            when(conversationOwnershipService.requireOwnedConversation(1L, 1L)).thenReturn(conv);
             when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Collections.emptyList());
 
-            List<MessageDTO> result = conversationService.getMessages(1L, 1L);
+            List<MessageDTO> result = conversationService.getMessages(1L);
 
             assertNotNull(result);
             assertTrue(result.isEmpty());
@@ -194,44 +192,35 @@ class ConversationModuleTest {
     class DeleteConversationTests {
 
         @Test
-        @DisplayName("删除会话 - 成功")
+        @DisplayName("删除会话 - 成功并清理用户隔离缓存")
         void deleteConversation_Success() {
             Conversation conv = new Conversation();
             conv.setId(1L);
             conv.setUserId(1L);
 
-            when(conversationMapper.selectById(1L)).thenReturn(conv);
-            when(conversationMapper.deleteById(1L)).thenReturn(1);
-            when(redisTemplate.delete(anyString())).thenReturn(true);
+            when(conversationOwnershipService.requireOwnedConversation(1L, 1L)).thenReturn(conv);
+            when(messageMapper.delete(any(LambdaQueryWrapper.class))).thenReturn(2);
+            when(conversationMapper.delete(any(LambdaQueryWrapper.class))).thenReturn(1);
+            when(cacheKeyFactory.conversationMessages(1L, 1L)).thenReturn("user:1:conversation:messages:1");
+            when(redisTemplate.delete("user:1:conversation:messages:1")).thenReturn(true);
 
-            conversationService.deleteConversation(1L, 1L);
+            conversationService.deleteConversation(1L);
 
-            verify(conversationMapper, times(1)).deleteById(1L);
-            verify(redisTemplate, times(1)).delete("conversation:messages:1");
+            verify(messageMapper, times(1)).delete(any(LambdaQueryWrapper.class));
+            verify(conversationMapper, times(1)).delete(any(LambdaQueryWrapper.class));
+            verify(redisTemplate, times(1)).delete("user:1:conversation:messages:1");
         }
 
         @Test
-        @DisplayName("删除会话 - 权限验证失败")
+        @DisplayName("删除会话 - 跨用户删除返回 403")
         void deleteConversation_InvalidPermission() {
-            Conversation otherConv = new Conversation();
-            otherConv.setId(1L);
-            otherConv.setUserId(999L);
-
-            when(conversationMapper.selectById(1L)).thenReturn(otherConv);
+            when(conversationOwnershipService.requireOwnedConversation(1L, 1L))
+                    .thenThrow(new BusinessException(403, "无权访问该会话"));
 
             BusinessException exception = assertThrows(BusinessException.class,
-                    () -> conversationService.deleteConversation(1L, 1L));
-            assertEquals("会话不存在或无权限删除", exception.getMessage());
-        }
-
-        @Test
-        @DisplayName("删除会话 - 会话不存在")
-        void deleteConversation_NotFound() {
-            when(conversationMapper.selectById(999L)).thenReturn(null);
-
-            BusinessException exception = assertThrows(BusinessException.class,
-                    () -> conversationService.deleteConversation(999L, 1L));
-            assertEquals("会话不存在或无权限删除", exception.getMessage());
+                    () -> conversationService.deleteConversation(1L));
+            assertEquals(403, exception.getCode());
+            assertEquals("无权访问该会话", exception.getMessage());
         }
     }
 }

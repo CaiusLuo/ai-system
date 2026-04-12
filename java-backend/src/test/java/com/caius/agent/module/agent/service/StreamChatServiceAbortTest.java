@@ -1,29 +1,38 @@
 package com.caius.agent.module.agent.service;
 
+import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
+import com.caius.agent.common.security.CurrentUserProvider;
 import com.caius.agent.dao.ConversationMapper;
 import com.caius.agent.dao.MessageMapper;
 import com.caius.agent.module.agent.config.AbortManager;
-import com.caius.agent.module.agent.dto.StreamChatRequest;
 import com.caius.agent.module.agent.service.impl.StreamChatServiceImpl;
 import com.caius.agent.module.conversation.entity.Conversation;
-import com.caius.agent.module.conversation.entity.Message;
+import com.caius.agent.module.conversation.service.ConversationOwnershipService;
 import com.caius.agent.module.gateway.PythonAgentStreamGateway;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.connection.stream.StreamOffset;
+import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * Abort 清理逻辑测试
+ * 流式会话用户隔离测试
  */
 @ExtendWith(MockitoExtension.class)
 public class StreamChatServiceAbortTest {
@@ -49,75 +58,66 @@ public class StreamChatServiceAbortTest {
     @Mock
     private AbortManager abortManager;
 
+    @Mock
+    private CurrentUserProvider currentUserProvider;
+
+    @Mock
+    private ConversationOwnershipService conversationOwnershipService;
+
+    @Mock
+    private UserScopedCacheKeyFactory cacheKeyFactory;
+
+    @Mock
+    private StreamOperations<String, Object, Object> streamOperations;
+
     @BeforeEach
     void setUp() {
-        // 设置默认配置
         ReflectionTestUtils.setField(streamChatService, "maxChunksPerMessage", 5000);
         ReflectionTestUtils.setField(streamChatService, "chunkTtlSeconds", 3600);
         ReflectionTestUtils.setField(streamChatService, "perUserLimit", 5);
         ReflectionTestUtils.setField(streamChatService, "taskTimeoutMinutes", 10);
+
+        Conversation conversation = new Conversation();
+        conversation.setId(100L);
+        conversation.setUserId(1L);
+
+        lenient().when(currentUserProvider.requireCurrentUserId()).thenReturn(1L);
+        lenient().when(conversationOwnershipService.requireOwnedConversation(100L, 1L)).thenReturn(conversation);
     }
 
     @Test
-    void cleanupAbortedMessages_NewConversation_ShouldDeleteConversation() {
-        // 这个测试验证 cleanupAbortedMessages 方法的逻辑
-        // 由于该方法是 private，我们通过行为来验证
-        
-        // 准备数据
-        Long conversationId = 100L;
-        String messageId = "test-message-id";
-        Long userMessageId = 200L;
-        boolean isNewConversation = true;
+    void abortStreamByConversationId_ShouldValidateOwnerAndTriggerAbort() {
+        when(abortManager.triggerAbortByConversationId(100L, 1L)).thenReturn(true);
 
-        // 验证：如果是新会话，应该删除会话和用户消息
-        assertTrue(isNewConversation, "应该是新创建的会话");
-        assertNotNull(conversationId, "会话ID不应为空");
-        assertNotNull(userMessageId, "用户消息ID不应为空");
+        boolean success = streamChatService.abortStreamByConversationId(100L);
+
+        assertTrue(success);
+        verify(conversationOwnershipService, times(1)).requireOwnedConversation(100L, 1L);
+        verify(abortManager, times(1)).triggerAbortByConversationId(100L, 1L);
     }
 
     @Test
-    void cleanupAbortedMessages_ExistingConversation_ShouldKeepConversation() {
-        // 准备数据
-        Long conversationId = 100L;
-        String messageId = "test-message-id";
-        Long userMessageId = 200L;
-        boolean isNewConversation = false;
+    void abortStream_ShouldUseCurrentUserOwnership() {
+        when(abortManager.triggerAbort("test-message-id", 1L)).thenReturn(true);
 
-        // 验证：如果是已有会话，应该保留会话
-        assertFalse(isNewConversation, "不应该是新创建的会话");
-        assertNotNull(conversationId, "会话ID不应为空");
-        assertNotNull(userMessageId, "用户消息ID不应为空");
+        boolean success = streamChatService.abortStream("test-message-id");
+
+        assertTrue(success);
+        verify(abortManager, times(1)).triggerAbort("test-message-id", 1L);
     }
 
     @Test
-    void abortStreamByConversationId_ShouldTriggerAbort() {
-        // 准备数据
-        Long conversationId = 100L;
-        
-        // 模拟 abortManager 行为
-        when(abortManager.triggerAbortByConversationId(conversationId)).thenReturn(true);
+    void recoverChunks_ShouldReadUserScopedRedisKey() {
+        when(cacheKeyFactory.streamChunks(1L, 100L, "message-1"))
+                .thenReturn("user:1:stream:100:message-1");
+        when(redisTemplate.opsForStream()).thenReturn(streamOperations);
+        when(streamOperations.read(any(StreamOffset.class))).thenReturn(null);
 
-        // 执行测试
-        boolean success = streamChatService.abortStreamByConversationId(conversationId);
+        streamChatService.recoverChunks(100L, "message-1", null, new SseEmitter());
 
-        // 验证结果
-        assertTrue(success, "abort 应该成功");
-        verify(abortManager, times(1)).triggerAbortByConversationId(conversationId);
-    }
-
-    @Test
-    void abortStream_ShouldTriggerAbort() {
-        // 准备数据
-        String messageId = "test-message-id";
-        
-        // 模拟 abortManager 行为
-        when(abortManager.triggerAbort(messageId)).thenReturn(true);
-
-        // 执行测试
-        boolean success = streamChatService.abortStream(messageId);
-
-        // 验证结果
-        assertTrue(success, "abort 应该成功");
-        verify(abortManager, times(1)).triggerAbort(messageId);
+        @SuppressWarnings("rawtypes")
+        ArgumentCaptor<StreamOffset> captor = ArgumentCaptor.forClass(StreamOffset.class);
+        verify(streamOperations, times(1)).read(captor.capture());
+        assertEquals("user:1:stream:100:message-1", captor.getValue().getKey());
     }
 }
