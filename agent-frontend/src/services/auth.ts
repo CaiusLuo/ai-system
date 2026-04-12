@@ -8,6 +8,7 @@ const USER_ID_KEY = 'userId';
 const USERNAME_KEY = 'username';
 const USER_ROLE_KEY = 'userRole';
 const USER_STATUS_KEY = 'userStatus';
+export const AUTH_PAGE_PATH = '/login';
 
 export type AuthStatus = 'valid' | 'missing' | 'expired' | 'invalid';
 
@@ -92,10 +93,16 @@ export function getAuthStatus(): AuthStatus {
   return 'valid';
 }
 
+export function getLoginRoute(reason: 'session-expired' | 'unauthorized' = 'unauthorized'): string {
+  return reason === 'session-expired'
+    ? `${AUTH_PAGE_PATH}?reason=session-expired`
+    : AUTH_PAGE_PATH;
+}
+
 export function redirectToLogin(reason: 'session-expired' | 'unauthorized' = 'unauthorized'): void {
   removeToken();
 
-  const target = reason === 'session-expired' ? '/auth?reason=session-expired' : '/auth';
+  const target = getLoginRoute(reason);
   const current = `${window.location.pathname}${window.location.search}`;
 
   if (current !== target) {

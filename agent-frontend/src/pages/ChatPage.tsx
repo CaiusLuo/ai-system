@@ -7,7 +7,7 @@ import MessageBubble from '../components/MessageBubble';
 import MessageSkeleton from '../components/MessageSkeleton';
 import ChatInput from '../components/ChatInput';
 import AdminPanel from './AdminPanel';
-import { logout, getUserInfo } from '../services/auth';
+import { logout, getUserInfo, AUTH_PAGE_PATH } from '../services/auth';
 
 // 本地消息转换为 Message 格式
 function storedToMessage(msg: { role: string; content: string; reasoning?: string; timestamp?: number }): Message {
@@ -293,7 +293,7 @@ export default function ChatPage() {
 
   const handleLogout = () => {
     logout();
-    navigate('/auth');
+    navigate(AUTH_PAGE_PATH);
   };
 
   const showAdminEntry = userRole === 'ADMIN';

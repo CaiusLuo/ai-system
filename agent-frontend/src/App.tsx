@@ -1,7 +1,7 @@
 import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
-import { getAuthStatus } from './services/auth'
+import { getAuthStatus, getLoginRoute, AUTH_PAGE_PATH } from './services/auth'
 
 // 懒加载页面组件（代码分割）
 const LandingPage = lazy(() => import('./pages/LandingPage'))
@@ -23,7 +23,8 @@ function PageLoader() {
 function App() {
   const authStatus = getAuthStatus();
   const loggedIn = authStatus === 'valid';
-  const authRedirect = authStatus === 'expired' ? '/auth?reason=session-expired' : '/auth';
+  const authRedirect = getLoginRoute(authStatus === 'expired' ? 'session-expired' : 'unauthorized');
+  const legacyAuthRedirect = loggedIn ? '/chat' : authRedirect;
 
   return (
     <BrowserRouter>
@@ -43,7 +44,10 @@ function App() {
           } />
 
           {/* 认证页面 */}
-          <Route path="/auth" element={loggedIn ? <Navigate to="/chat" replace /> : <AuthPage />} />
+          <Route path={AUTH_PAGE_PATH} element={loggedIn ? <Navigate to="/chat" replace /> : <AuthPage />} />
+
+          {/* 兼容旧前端路由，避免 SPA 内旧链接失效 */}
+          <Route path="/auth" element={<Navigate to={legacyAuthRedirect} replace />} />
 
           {/* 聊天页面（需要认证） */}
           <Route path="/chat" element={

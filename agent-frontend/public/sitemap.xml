@@ -18,7 +18,7 @@
 
   <!-- 认证页面 -->
   <url>
-    <loc>https://job-agent.example.com/auth</loc>
+    <loc>https://job-agent.example.com/login</loc>
     <changefreq>monthly</changefreq>
     <priority>0.3</priority>
   </url>
