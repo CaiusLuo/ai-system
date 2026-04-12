@@ -50,9 +50,10 @@ public class StreamChatController {
      * @return 中断结果
      */
     @PostMapping(value = "/api/v1/chat/{conversationId}/abort")
-    public Result<Boolean> abortByConversationId(@PathVariable Long conversationId) {
+    public Result<Boolean> abortByConversationId(@AuthenticationPrincipal Long userId,
+                                                 @PathVariable Long conversationId) {
         log.info("[Abort] 收到基于 conversationId 的中断请求, conversationId={}", conversationId);
-        boolean success = streamChatService.abortStreamByConversationId(conversationId);
+        boolean success = streamChatService.abortStreamByConversationId(userId, conversationId);
         return Result.success(success);
     }
 
@@ -67,7 +68,8 @@ public class StreamChatController {
      * @return 中断结果
      */
     @PostMapping("/chat/stream/abort")
-    public Result<Boolean> abortStream(@RequestBody AbortRequest request) {
+    public Result<Boolean> abortStream(@AuthenticationPrincipal Long userId,
+                                       @RequestBody AbortRequest request) {
         String messageId = request.getMessageId();
         if (messageId == null || messageId.isBlank()) {
             log.warn("[Abort] messageId 为空");
@@ -75,7 +77,7 @@ public class StreamChatController {
         }
 
         log.info("[Abort] 收到中断请求, messageId={}", messageId);
-        boolean success = streamChatService.abortStream(messageId);
+        boolean success = streamChatService.abortStream(userId, messageId);
         return Result.success(success);
     }
 
@@ -91,6 +93,7 @@ public class StreamChatController {
      */
     @GetMapping(value = "/chat/stream/recover", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter recoverStream(
+            @AuthenticationPrincipal Long userId,
             @RequestParam Long conversationId,
             @RequestParam String messageId,
             @RequestParam(required = false) String lastEventId) {
@@ -102,7 +105,7 @@ public class StreamChatController {
 
         try {
             // 从 Redis 读取并 replay chunk
-            streamChatService.recoverChunks(conversationId, messageId, lastEventId, emitter);
+            streamChatService.recoverChunks(userId, conversationId, messageId, lastEventId, emitter);
             emitter.complete();
         } catch (Exception e) {
             log.error("[断线恢复] 恢复失败", e);

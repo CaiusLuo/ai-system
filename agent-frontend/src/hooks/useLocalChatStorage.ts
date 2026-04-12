@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { CHAT_CONVERSATIONS_KEY, CHAT_CURRENT_CONV_KEY, clearPersistedChatState } from '../services/chatStorage';
 
 interface StoredMessage {
   role: 'user' | 'assistant';
@@ -18,9 +19,6 @@ interface StoredConversation {
   updatedAt: number;
 }
 
-const STORAGE_KEY = 'chat_conversations';
-const CURRENT_CONV_KEY = 'chat_current_conv_id';
-
 // 最大存储对话数
 const MAX_CONVERSATIONS = 50;
 // 每个对话最大消息数
@@ -31,7 +29,7 @@ const MAX_MESSAGES = 200;
  */
 export function getStoredConversations(): Record<string, StoredConversation> {
   try {
-    const data = localStorage.getItem(STORAGE_KEY);
+    const data = localStorage.getItem(CHAT_CONVERSATIONS_KEY);
     return data ? JSON.parse(data) : {};
   } catch {
     return {};
@@ -43,7 +41,7 @@ export function getStoredConversations(): Record<string, StoredConversation> {
  */
 function saveStoredConversations(convs: Record<string, StoredConversation>): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(convs));
+    localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(convs));
   } catch (e) {
     console.warn('[LocalStorage] Failed to save conversations:', e);
   }
@@ -63,7 +61,7 @@ export function useLocalChatStorage() {
   // 获取当前对话 ID
   const getCurrentConvId = useCallback((): string | null => {
     try {
-      return localStorage.getItem(CURRENT_CONV_KEY);
+      return localStorage.getItem(CHAT_CURRENT_CONV_KEY);
     } catch {
       return null;
     }
@@ -73,9 +71,9 @@ export function useLocalChatStorage() {
   const setCurrentConvId = useCallback((id: string | null) => {
     try {
       if (id === null) {
-        localStorage.removeItem(CURRENT_CONV_KEY);
+        localStorage.removeItem(CHAT_CURRENT_CONV_KEY);
       } else {
-        localStorage.setItem(CURRENT_CONV_KEY, id);
+        localStorage.setItem(CHAT_CURRENT_CONV_KEY, id);
       }
     } catch (e) {
       console.warn('[LocalStorage] Failed to set current conv id:', e);
@@ -212,8 +210,7 @@ export function useLocalChatStorage() {
 
   // 清空所有本地数据
   const clearAll = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(CURRENT_CONV_KEY);
+    clearPersistedChatState();
   }, []);
 
   return {

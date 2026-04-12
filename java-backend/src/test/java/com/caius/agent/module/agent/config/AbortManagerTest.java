@@ -1,5 +1,6 @@
 package com.caius.agent.module.agent.config;
 
+import com.caius.agent.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -88,7 +89,7 @@ class AbortManagerTest {
         @DisplayName("通过 conversationId 触发 abort")
         void triggerAbortByConversationId_Success() {
             // 准备数据
-            abortManager.createAbortFlag("message-1", 100L);
+            abortManager.createAbortFlag("message-1", 1L, 100L);
 
             // 执行测试
             boolean result = abortManager.triggerAbortByConversationId(100L);
@@ -112,7 +113,7 @@ class AbortManagerTest {
         @DisplayName("清理 abort 标记")
         void cleanup_Success() {
             // 准备数据
-            abortManager.createAbortFlag("message-1", 100L);
+            abortManager.createAbortFlag("message-1", 1L, 100L);
             abortManager.triggerAbort("message-1");
 
             // 执行测试
@@ -231,7 +232,7 @@ class AbortManagerTest {
                 executor.submit(() -> {
                     try {
                         String messageId = "message-" + index;
-                        abortManager.createAbortFlag(messageId, (long) index);
+                        abortManager.createAbortFlag(messageId, (long) index, (long) index);
                         abortManager.triggerAbort(messageId);
                         abortManager.cleanup(messageId);
                     } finally {
@@ -301,6 +302,30 @@ class AbortManagerTest {
 
             // 验证结果
             assertFalse(result);
+        }
+
+        @Test
+        @DisplayName("非所有者不能按 messageId 中断")
+        void triggerAbort_WithWrongUser_ShouldThrow403() {
+            abortManager.createAbortFlag("message-1", 1L, 100L);
+
+            BusinessException exception = assertThrows(BusinessException.class,
+                    () -> abortManager.triggerAbort("message-1", 2L));
+
+            assertEquals(403, exception.getCode());
+            assertEquals("无权中断该会话", exception.getMessage());
+        }
+
+        @Test
+        @DisplayName("非所有者不能按 conversationId 中断")
+        void triggerAbortByConversationId_WithWrongUser_ShouldThrow403() {
+            abortManager.createAbortFlag("message-1", 1L, 100L);
+
+            BusinessException exception = assertThrows(BusinessException.class,
+                    () -> abortManager.triggerAbortByConversationId(100L, 2L));
+
+            assertEquals(403, exception.getCode());
+            assertEquals("无权中断该会话", exception.getMessage());
         }
     }
 }

@@ -129,6 +129,8 @@ export async function createSSEConnection(
   if (!response.ok) {
     let errorMessage = response.status === 401
       ? '认证失败，请重新登录'
+      : response.status === 403
+        ? '无权访问当前会话'
       : response.status === 429
         ? '请求过于频繁，请稍后重试'
         : `服务器错误 (${response.status})`;
@@ -144,6 +146,15 @@ export async function createSSEConnection(
       handlers.onError?.({ type: 'error', message: errorMessage });
       redirectToLogin(errorMessage.includes('过期') ? 'session-expired' : 'unauthorized');
       return;
+    }
+
+    if (response.status === 403) {
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData?.message || errorMessage;
+      } catch {
+        // ignore JSON parse failure and keep fallback message
+      }
     }
     
     handlers.onError?.({ type: 'error', message: errorMessage });

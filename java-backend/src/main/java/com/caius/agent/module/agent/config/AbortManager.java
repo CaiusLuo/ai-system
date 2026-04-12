@@ -1,5 +1,6 @@
 package com.caius.agent.module.agent.config;
 
+import com.caius.agent.common.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -29,10 +30,17 @@ public class AbortManager {
     private final ConcurrentHashMap<String, AtomicBoolean> abortMap = new ConcurrentHashMap<>();
 
     /**
-     * conversationId -> messageId 映射
-     * 用于通过 conversationId 查找对应的 messageId
+     * conversationId -> (userId, messageId) 映射
      */
-    private final ConcurrentHashMap<Long, String> conversationMessageMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, ConversationAbortContext> conversationMessageMap = new ConcurrentHashMap<>();
+
+    /**
+     * messageId -> userId 映射
+     */
+    private final ConcurrentHashMap<String, Long> messageOwnerMap = new ConcurrentHashMap<>();
+
+    private record ConversationAbortContext(Long userId, String messageId) {
+    }
 
     /**
      * 创建 abort 标记（任务开始时调用）
@@ -55,10 +63,17 @@ public class AbortManager {
      * @param conversationId 会话 ID
      */
     public void createAbortFlag(String messageId, Long conversationId) {
+        createAbortFlag(messageId, null, conversationId);
+    }
+
+    public void createAbortFlag(String messageId, Long userId, Long conversationId) {
         createAbortFlag(messageId);
-        if (conversationId != null) {
-            conversationMessageMap.put(conversationId, messageId);
-            log.debug("[AbortManager] 关联 conversationId={}, messageId={}", conversationId, messageId);
+        if (userId != null) {
+            messageOwnerMap.put(messageId, userId);
+        }
+        if (conversationId != null && userId != null) {
+            conversationMessageMap.put(conversationId, new ConversationAbortContext(userId, messageId));
+            log.debug("[AbortManager] 关联 userId={}, conversationId={}, messageId={}", userId, conversationId, messageId);
         }
     }
 
@@ -90,6 +105,18 @@ public class AbortManager {
         return true;
     }
 
+    public boolean triggerAbort(String messageId, Long userId) {
+        Long ownerId = messageOwnerMap.get(messageId);
+        if (ownerId == null) {
+            log.warn("[AbortManager] abort 归属不存在, messageId={}", messageId);
+            return false;
+        }
+        if (!ownerId.equals(userId)) {
+            throw new BusinessException(403, "无权中断该会话");
+        }
+        return triggerAbort(messageId);
+    }
+
     /**
      * 通过 conversationId 触发 abort
      * 
@@ -97,12 +124,24 @@ public class AbortManager {
      * @return true = 成功设置, false = 没有找到活跃流
      */
     public boolean triggerAbortByConversationId(Long conversationId) {
-        String messageId = conversationMessageMap.get(conversationId);
-        if (messageId == null) {
+        ConversationAbortContext context = conversationMessageMap.get(conversationId);
+        if (context == null) {
             log.warn("[AbortManager] 没有找到 conversationId 对应的活跃流, conversationId={}", conversationId);
             return false;
         }
-        return triggerAbort(messageId);
+        return triggerAbort(context.messageId());
+    }
+
+    public boolean triggerAbortByConversationId(Long conversationId, Long userId) {
+        ConversationAbortContext context = conversationMessageMap.get(conversationId);
+        if (context == null) {
+            log.warn("[AbortManager] 没有找到 conversationId 对应的活跃流, conversationId={}", conversationId);
+            return false;
+        }
+        if (!context.userId().equals(userId)) {
+            throw new BusinessException(403, "无权中断该会话");
+        }
+        return triggerAbort(context.messageId());
     }
 
     /**
@@ -118,9 +157,11 @@ public class AbortManager {
             log.debug("[AbortManager] abort 标记已不存在（可能已被清理）, messageId={}", messageId);
         }
 
+        messageOwnerMap.remove(messageId);
+
         // 同时清理 conversationMessageMap
         conversationMessageMap.entrySet().removeIf(entry -> 
-            entry.getValue().equals(messageId)
+            entry.getValue().messageId().equals(messageId)
         );
     }
 

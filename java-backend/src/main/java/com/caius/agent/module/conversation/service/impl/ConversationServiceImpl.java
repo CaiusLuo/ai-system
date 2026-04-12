@@ -1,6 +1,7 @@
 package com.caius.agent.module.conversation.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
 import com.caius.agent.common.exception.BusinessException;
 import com.caius.agent.dao.ConversationMapper;
 import com.caius.agent.dao.MessageMapper;
@@ -9,6 +10,7 @@ import com.caius.agent.module.conversation.dto.ConversationDTO;
 import com.caius.agent.module.conversation.dto.MessageDTO;
 import com.caius.agent.module.conversation.entity.Conversation;
 import com.caius.agent.module.conversation.entity.Message;
+import com.caius.agent.module.conversation.service.ConversationOwnershipService;
 import com.caius.agent.module.conversation.service.ConversationService;
 import com.caius.agent.module.user.entity.User;
 import lombok.RequiredArgsConstructor;
@@ -32,8 +34,8 @@ public class ConversationServiceImpl implements ConversationService {
     private final MessageMapper messageMapper;
     private final UserMapper userMapper;
     private final StringRedisTemplate redisTemplate;
-
-    private static final String CONVERSATION_CACHE_KEY = "conversation:messages:";
+    private final ConversationOwnershipService conversationOwnershipService;
+    private final UserScopedCacheKeyFactory cacheKeyFactory;
 
     @Override
     public List<ConversationDTO> getConversations(Long userId) {
@@ -54,7 +56,7 @@ public class ConversationServiceImpl implements ConversationService {
                 .collect(Collectors.toList());
 
         // 查询每个会话的最新消息
-        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(conversationIds);
+        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(userId, conversationIds);
 
         // 转换为 DTO
         return conversations.stream()
@@ -64,16 +66,13 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public List<MessageDTO> getMessages(Long conversationId, Long userId) {
-        // 验证会话权限
-        Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !conversation.getUserId().equals(userId)) {
-            throw new BusinessException("会话不存在或无权限访问");
-        }
+        conversationOwnershipService.requireOwnedConversation(conversationId, userId);
 
         // 获取消息列表
         List<Message> messages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
                         .eq(Message::getConversationId, conversationId)
+                        .eq(Message::getUserId, userId)
                         .orderByAsc(Message::getCreatedAt)
         );
 
@@ -98,7 +97,7 @@ public class ConversationServiceImpl implements ConversationService {
     /**
      * 批量获取每个会话的最新消息
      */
-    private Map<Long, Message> getLatestMessagesByConversationIds(List<Long> conversationIds) {
+    private Map<Long, Message> getLatestMessagesByConversationIds(Long userId, List<Long> conversationIds) {
         if (CollectionUtils.isEmpty(conversationIds)) {
             return Collections.emptyMap();
         }
@@ -107,6 +106,7 @@ public class ConversationServiceImpl implements ConversationService {
         List<Message> latestMessages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
                         .in(Message::getConversationId, conversationIds)
+                        .eq(Message::getUserId, userId)
                         .orderByDesc(Message::getCreatedAt)
         );
 
@@ -166,16 +166,12 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public void deleteConversation(Long conversationId, Long userId) {
-        // 验证会话权限
-        Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !conversation.getUserId().equals(userId)) {
-            throw new BusinessException("会话不存在或无权限删除");
-        }
+        conversationOwnershipService.requireOwnedConversation(conversationId, userId);
 
         // 逻辑删除会话
         conversationMapper.deleteById(conversationId);
 
         // 清除 Redis 缓存
-        redisTemplate.delete(CONVERSATION_CACHE_KEY + conversationId);
+        redisTemplate.delete(cacheKeyFactory.conversationMessages(userId, conversationId));
     }
 }

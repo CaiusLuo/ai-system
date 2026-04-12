@@ -1,5 +1,6 @@
 package com.caius.agent.module.agent.service.impl;
 
+import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
 import com.caius.agent.dao.ConversationMapper;
 import com.caius.agent.dao.MessageMapper;
 import com.caius.agent.module.agent.config.AbortManager;
@@ -8,6 +9,7 @@ import com.caius.agent.module.agent.model.SseEvent;
 import com.caius.agent.module.agent.service.StreamChatService;
 import com.caius.agent.module.conversation.entity.Conversation;
 import com.caius.agent.module.conversation.entity.Message;
+import com.caius.agent.module.conversation.service.ConversationOwnershipService;
 import com.caius.agent.module.gateway.PythonAgentStreamGateway;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -57,6 +59,8 @@ public class StreamChatServiceImpl implements StreamChatService {
     private final ConversationMapper conversationMapper;
     private final StringRedisTemplate redisTemplate;
     private final AbortManager abortManager;
+    private final ConversationOwnershipService conversationOwnershipService;
+    private final UserScopedCacheKeyFactory cacheKeyFactory;
 
     @Value("${streaming.max-chunks-per-message:5000}")
     private int maxChunksPerMessage;
@@ -143,7 +147,7 @@ public class StreamChatServiceImpl implements StreamChatService {
         }
 
         // 创建 abort 标记并关联 conversationId
-        abortManager.createAbortFlag(messageId, conversationId);
+        abortManager.createAbortFlag(messageId, userId, conversationId);
         log.info("[流式] 开始处理, userId={}, messageId={}, conversationId={}, isNewConversation={}", 
                 userId, messageId, conversationId, isNewConversation[0]);
 
@@ -156,7 +160,7 @@ public class StreamChatServiceImpl implements StreamChatService {
         AtomicBoolean completed = new AtomicBoolean(false);
         AtomicBoolean aborted = new AtomicBoolean(false);
 
-        String redisKey = "stream:" + conversationId + ":" + messageId;
+        String redisKey = cacheKeyFactory.streamChunks(userId, conversationId, messageId);
 
         // ⭐ 方案2：延迟写入用户消息（不在请求开始时写入）
         // 用户消息将在 done 事件中与 AI 消息一起异步写入
@@ -256,7 +260,7 @@ public class StreamChatServiceImpl implements StreamChatService {
                                 // ⭐ 方案3：error 场景也清理（虽然用户消息还没写入，但需要清理 Redis）
                                 final String errorMsg = "AI 服务返回错误";
                                 CompletableFuture.runAsync(() -> {
-                                    cleanupAfterError(conversationId, messageId, redisKey, isNewConversation[0]);
+                                    cleanupAfterError(userId, conversationId, messageId, redisKey, isNewConversation[0]);
                                 }, storageExecutor);
                                 emitter.trySendError(errorMsg);
                                 emitter.complete();
@@ -298,7 +302,7 @@ public class StreamChatServiceImpl implements StreamChatService {
                         // 但如果 done 事件的异步写入已启动，可能需要特殊处理
                         if (aborted.get()) {
                             cleanupAbortedMessages(
-                                conversationId, messageId, 
+                                userId, conversationId, messageId,
                                 pendingUserMessageId[0],  // 可能为 null（done 异步未完成时）
                                 redisKey, isNewConversation[0]);
                         }
@@ -439,6 +443,8 @@ public class StreamChatServiceImpl implements StreamChatService {
             conv.setUpdatedAt(LocalDateTime.now());
             conversationMapper.insert(conv);
             conversationId = conv.getId();
+        } else {
+            conversationOwnershipService.requireOwnedConversation(conversationId, userId);
         }
         return conversationId;
     }
@@ -502,8 +508,9 @@ public class StreamChatServiceImpl implements StreamChatService {
     }
 
     @Override
-    public void recoverChunks(Long conversationId, String messageId, String lastEventId, SseEmitter emitter) {
-        String redisKey = "stream:" + conversationId + ":" + messageId;
+    public void recoverChunks(Long userId, Long conversationId, String messageId, String lastEventId, SseEmitter emitter) {
+        conversationOwnershipService.requireOwnedConversation(conversationId, userId);
+        String redisKey = cacheKeyFactory.streamChunks(userId, conversationId, messageId);
         try {
             var records = redisTemplate.opsForStream().read(StreamOffset.fromStart(redisKey));
             if (records != null) {
@@ -522,9 +529,9 @@ public class StreamChatServiceImpl implements StreamChatService {
     }
 
     @Override
-    public boolean abortStream(String messageId) {
+    public boolean abortStream(Long userId, String messageId) {
         log.info("[Abort] 收到中断请求, messageId={}", messageId);
-        boolean success = abortManager.triggerAbort(messageId);
+        boolean success = abortManager.triggerAbort(messageId, userId);
         if (success) {
             log.info("[Abort] 中断信号已发送, messageId={}", messageId);
         } else {
@@ -534,9 +541,10 @@ public class StreamChatServiceImpl implements StreamChatService {
     }
 
     @Override
-    public boolean abortStreamByConversationId(Long conversationId) {
+    public boolean abortStreamByConversationId(Long userId, Long conversationId) {
+        conversationOwnershipService.requireOwnedConversation(conversationId, userId);
         log.info("[Abort] 收到基于 conversationId 的中断请求, conversationId={}", conversationId);
-        boolean success = abortManager.triggerAbortByConversationId(conversationId);
+        boolean success = abortManager.triggerAbortByConversationId(conversationId, userId);
         if (success) {
             log.info("[Abort] 中断信号已发送, conversationId={}", conversationId);
         } else {
@@ -557,7 +565,7 @@ public class StreamChatServiceImpl implements StreamChatService {
      * @param redisKey Redis key
      * @param isNewConversation 是否是新创建的会话
      */
-    private void cleanupAbortedMessages(Long conversationId, String messageId,
+    private void cleanupAbortedMessages(Long userId, Long conversationId, String messageId,
                                          Long userMessageId, String redisKey, boolean isNewConversation) {
         log.info("[Abort] 清理中间数据, conversationId={}, messageId={}, userMessageId={}, isNewConversation={}",
                 conversationId, messageId, userMessageId, isNewConversation);
@@ -569,7 +577,11 @@ public class StreamChatServiceImpl implements StreamChatService {
 
             // 2. 删除用户消息（如果已写入）
             if (userMessageId != null) {
-                messageMapper.deleteById(userMessageId);
+                messageMapper.delete(
+                        new LambdaQueryWrapper<Message>()
+                                .eq(Message::getId, userMessageId)
+                                .eq(Message::getUserId, userId)
+                );
                 log.debug("[Abort] 已删除用户消息: {}", userMessageId);
             } else {
                 log.debug("[Abort] 用户消息尚未写入，跳过删除");
@@ -579,12 +591,17 @@ public class StreamChatServiceImpl implements StreamChatService {
             // 如果没有任何消息，删除空会话
             if (isNewConversation && conversationId != null) {
                 long messageCount = messageMapper.selectCount(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Message>()
+                    new LambdaQueryWrapper<Message>()
                         .eq(Message::getConversationId, conversationId)
+                        .eq(Message::getUserId, userId)
                 );
                 
                 if (messageCount == 0) {
-                    conversationMapper.deleteById(conversationId);
+                    conversationMapper.delete(
+                            new LambdaQueryWrapper<Conversation>()
+                                    .eq(Conversation::getId, conversationId)
+                                    .eq(Conversation::getUserId, userId)
+                    );
                     log.info("[Abort] 已删除空会话: {}", conversationId);
                 } else {
                     log.info("[Abort] 会话已有消息，保留会话: {}, 消息数={}", conversationId, messageCount);
@@ -609,7 +626,7 @@ public class StreamChatServiceImpl implements StreamChatService {
      * @param redisKey Redis key
      * @param isNewConversation 是否是新创建的会话
      */
-    private void cleanupAfterError(Long conversationId, String messageId,
+    private void cleanupAfterError(Long userId, Long conversationId, String messageId,
                                     String redisKey, boolean isNewConversation) {
         log.info("[Error] 清理中间数据, conversationId={}, messageId={}", conversationId, messageId);
 
@@ -621,12 +638,17 @@ public class StreamChatServiceImpl implements StreamChatService {
             // 2. 如果是新创建的会话，检查是否有消息存在
             if (isNewConversation && conversationId != null) {
                 long messageCount = messageMapper.selectCount(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Message>()
+                    new LambdaQueryWrapper<Message>()
                         .eq(Message::getConversationId, conversationId)
+                        .eq(Message::getUserId, userId)
                 );
                 
                 if (messageCount == 0) {
-                    conversationMapper.deleteById(conversationId);
+                    conversationMapper.delete(
+                            new LambdaQueryWrapper<Conversation>()
+                                    .eq(Conversation::getId, conversationId)
+                                    .eq(Conversation::getUserId, userId)
+                    );
                     log.info("[Error] 已删除空会话: {}", conversationId);
                 }
             }

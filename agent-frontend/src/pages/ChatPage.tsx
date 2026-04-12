@@ -29,6 +29,7 @@ export default function ChatPage() {
     sendMessage,
     abortStream,
     clearMessages,
+    resetChatState,
     loadConversation,
   } = useSSEChat();
 
@@ -41,6 +42,7 @@ export default function ChatPage() {
     deleteConversation: deleteLocalConv,
     switchConversation,
     syncBackendId,
+    clearAll,
   } = useLocalChatStorage();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -291,9 +293,21 @@ export default function ChatPage() {
     }
   }, [remoteConvId, currentLocalConvId, syncBackendId]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (isLoading) {
+      await abortStream();
+    }
+
+    savedStreamingMessageRef.current.clear();
+    clearAll();
+    resetChatState();
+    setLocalMessages([]);
+    setLocalConversations([]);
+    setCurrentLocalConvId(null);
+    setHasLoadedFromBackend(false);
+
     logout();
-    navigate(AUTH_PAGE_PATH);
+    navigate(AUTH_PAGE_PATH, { replace: true });
   };
 
   const showAdminEntry = userRole === 'ADMIN';

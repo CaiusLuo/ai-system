@@ -2,6 +2,7 @@
 
 import { api, ApiResponse } from './api';
 import { LoginParams, RegisterParams, LoginResponse, UserDTO } from '../types';
+import { clearPersistedChatState } from './chatStorage';
 
 const TOKEN_KEY = 'token';
 const USER_ID_KEY = 'userId';
@@ -31,6 +32,7 @@ export function removeToken(): void {
   localStorage.removeItem(USERNAME_KEY);
   localStorage.removeItem(USER_ROLE_KEY);
   localStorage.removeItem(USER_STATUS_KEY);
+  clearPersistedChatState();
 }
 
 function decodeBase64Url(value: string): string | null {

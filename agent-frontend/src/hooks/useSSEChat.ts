@@ -18,6 +18,7 @@ interface UseSSEChatReturn {
   sendMessage: (message: string, conversationId?: number) => void;
   abortStream: () => void;
   clearMessages: () => void;
+  resetChatState: () => void;
   setConversationId: (id: number | null) => void; // 手动设置会话 ID
   loadConversation: (id: number) => Promise<void>; // 加载历史消息
 }
@@ -219,6 +220,21 @@ export function useSSEChat(): UseSSEChatReturn {
     // 注意：不清除 conversationId，以便用户可以继续在同一会话中对话
   }, [closeConnection]);
 
+  const resetChatState = useCallback(() => {
+    closeConnection();
+    setMessages([]);
+    setCurrentStreamingMessage('');
+    setCurrentStreamingReasoning('');
+    streamingBufferRef.current = '';
+    streamingReasoningBufferRef.current = '';
+    setError(null);
+    setIsLoading(false);
+    setConversationId(null);
+    setMessageId(null);
+    messageIdRef.current = null;
+    abortControllerRef.current = null;
+  }, [closeConnection]);
+
   // 加载历史消息
   const loadConversation = useCallback(async (id: number) => {
     try {
@@ -262,6 +278,7 @@ export function useSSEChat(): UseSSEChatReturn {
     sendMessage,
     abortStream,
     clearMessages,
+    resetChatState,
     setConversationId,
     loadConversation,
   };

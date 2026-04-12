@@ -1,6 +1,7 @@
 package com.caius.agent.common.exception;
 
 import com.caius.agent.common.result.Result;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -20,7 +21,10 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    public Result<?> handleBusinessException(BusinessException e) {
+    public Result<?> handleBusinessException(BusinessException e, HttpServletResponse response) {
+        if (e.getCode() != null && e.getCode() == HttpStatus.FORBIDDEN.value()) {
+            response.setStatus(HttpStatus.FORBIDDEN.value());
+        }
         log.error("业务异常: {}", e.getMessage());
         return Result.error(e.getCode(), e.getMessage());
     }

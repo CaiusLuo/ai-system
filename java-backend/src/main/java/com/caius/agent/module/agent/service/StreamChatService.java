@@ -25,7 +25,7 @@ public interface StreamChatService {
      * @param lastEventId    最后接收到的事件 ID（可选）
      * @param emitter        SSE 发射器
      */
-    void recoverChunks(Long conversationId, String messageId, String lastEventId, SseEmitter emitter);
+    void recoverChunks(Long userId, Long conversationId, String messageId, String lastEventId, SseEmitter emitter);
 
     /**
      * 中断流式生成
@@ -33,7 +33,7 @@ public interface StreamChatService {
      * @param messageId 消息 ID（UUID）
      * @return true = 成功中断, false = 任务已结束或不存在
      */
-    boolean abortStream(String messageId);
+    boolean abortStream(Long userId, String messageId);
 
     /**
      * 通过 conversationId 中断流式生成
@@ -41,5 +41,5 @@ public interface StreamChatService {
      * @param conversationId 会话 ID
      * @return true = 成功中断, false = 任务已结束或不存在
      */
-    boolean abortStreamByConversationId(Long conversationId);
+    boolean abortStreamByConversationId(Long userId, Long conversationId);
 }
