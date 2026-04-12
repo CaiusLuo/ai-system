@@ -1,951 +1,1481 @@
 # 前端 API 对接文档
 
-> **后端地址**: `http://localhost:8080`
-> **代理前缀**: `/agent`（通过 Vite 代理转发）
-> **更新时间**: 2026-04-10
-> **文档版本**: v3.0 - Message & Conversation 数据结构对齐
+> **后端服务端口：** `8080`
+> 
+> **认证方式：** JWT Bearer Token
+> 
+> **统一响应格式：** `{ code: 200, message: "操作成功", data: {} }`
 
 ---
 
-## ⚠️ 重要变更说明
+## 目录
 
-### Message & Conversation 数据结构对齐（2026-04-10）
-
-本次更新基于后端实际代码，确保前端 TypeScript 类型定义与后端 DTO **完全一致**：
-
-1. ✅ **会话列表** (`GET /conversation/list`) - `ConversationDTO` 结构确认
-2. ✅ **消息列表** (`GET /conversation/{id}/messages`) - `MessageDTO` 结构确认
-3. ✅ **SSE 流式对话** - `messageId` 和 `conversationId` 获取方式确认
-4. ✅ **Abort 机制** - 清理逻辑确认
-
-**前端必须使用下方提供的 TypeScript 类型定义，确保数据结构一致。**
+- [1. 认证模块](#1-认证模块)
+- [2. 流式对话模块](#2-流式对话模块)
+- [3. 会话管理模块](#3-会话管理模块)
+- [4. 用户模块](#4-用户模块)
+- [5. 管理员模块](#5-管理员模块)
+- [6. TypeScript 类型定义](#6-typescript-类型定义)
+- [7. 完整示例代码](#7-完整示例代码)
 
 ---
 
-## 统一响应格式
+## 1. 认证模块
 
-所有接口均返回以下格式：
+### 1.1 用户注册
 
+**接口路径：** `POST /auth/register`
+
+**认证：** 不需要
+
+**请求体：**
 ```typescript
-interface ApiResponse<T> {
-  code: number;      // 200 = 成功，其他 = 失败
-  message: string;   // 提示信息
+interface RegisterRequest {
+  username: string;   // 用户名（3-50字符，必填）
+  email: string;      // 邮箱地址（必填）
+  password: string;   // 密码（6-50字符，必填）
+}
+```
+
+```json
+{
+  "username": "testuser",
+  "email": "test@example.com",
+  "password": "123456"
+}
+```
+
+**响应：**
+```typescript
+interface Result<T> {
+  code: number;       // 200=成功
+  message: string;    // 提示信息
   data: T;           // 响应数据
 }
+
+// 注册响应
+Result<string>
+```
+
+```json
+{
+  "code": 200,
+  "message": "注册成功",
+  "data": "注册成功"
+}
 ```
 
 ---
 
-## 1. 认证接口
+### 1.2 用户登录
 
-### 1.1 用户登录
+**接口路径：** `POST /auth/login`
 
-**POST** `/auth/login`
+**认证：** 不需要
 
 **请求体：**
 ```typescript
+interface LoginRequest {
+  username: string;   // 用户名（必填）
+  password: string;   // 密码（必填）
+}
+```
+
+```json
 {
-  username: string;
-  password: string;
+  "username": "testuser",
+  "password": "123456"
 }
 ```
 
 **响应：**
 ```typescript
+interface LoginResponse {
+  token: string;      // JWT 认证令牌
+  userId: number;     // 用户 ID
+  username: string;   // 用户名
+  role: string;       // 用户角色（USER/ADMIN）
+}
+
+Result<LoginResponse>
+```
+
+```json
 {
-  code: 200,
-  message: "登录成功",
-  data: {
-    token: string;          // JWT Token
-    userId: number;         // 用户 ID
-    username: string;       // 用户名
-    role: string;           // 角色：ADMIN | USER
+  "code": 200,
+  "message": "登录成功",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "userId": 1,
+    "username": "testuser",
+    "role": "USER"
   }
 }
 ```
 
-**前端处理：**
-```typescript
-// 保存 Token 到 localStorage
-localStorage.setItem('token', response.data.token);
-localStorage.setItem('userId', response.data.userId.toString());
-```
-
 ---
 
-## 2. 用户接口
+### 1.3 获取当前用户信息
 
-### 2.1 获取用户信息
+**接口路径：** `GET /auth/me`
 
-**GET** `/user/{id}`
-
-**⚠️ 变更说明：** 
-- 返回数据结构已更改，现在使用 `UserDTO` 格式
-- **不再包含** `password` 字段
-- 新增 `statusText` 字段
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
 
 **响应：**
 ```typescript
+interface CurrentUserResponse {
+  userId: number;     // 用户 ID
+  username: string;   // 用户名
+  role: string;       // 用户角色
+  status: number;     // 状态（1=激活, 0=禁用）
+  statusText: string; // 状态文本
+}
+
+Result<CurrentUserResponse>
+```
+
+```json
 {
-  code: 200,
-  data: {
-    id: number;             // 用户 ID
-    username: string;       // 用户名
-    email: string;          // 邮箱
-    role: string;           // 角色：ADMIN | USER
-    status: number;         // 状态：1 = 启用，0 = 禁用
-    statusText: string;     // 状态文本："ACTIVE" | "DISABLED"
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "userId": 1,
+    "username": "testuser",
+    "role": "USER",
+    "status": 1,
+    "statusText": "激活"
   }
 }
 ```
 
-**前端使用示例：**
-```typescript
-interface UserDTO {
-  id: number;
-  username: string;
-  email: string;
-  role: 'ADMIN' | 'USER';
-  status: number;
-  statusText: 'ACTIVE' | 'DISABLED';
-}
-
-const response = await fetch('/user/1', {
-  headers: { 'Authorization': `Bearer ${token}` }
-});
-const user: UserDTO = response.data;
-
-// 显示用户状态
-const isActive = user.status === 1; // 或 user.statusText === 'ACTIVE'
-```
-
-### 2.2 更新用户信息
-
-**PUT** `/user/{id}`
-
-**请求体（所有字段可选）：**
-```typescript
-{
-  username?: string;
-  email?: string;
-  password?: string;         // 如果提供，会自动加密
-}
-```
-
-**响应：**
-```typescript
-{
-  code: 200,
-  message: "更新成功",
-  data: null
-}
-```
-
 ---
 
-## 3. 会话管理接口
+## 2. 流式对话模块
 
-### 3.1 获取会话列表
+### 2.1 发起流式对话
 
-**GET** `/conversation/list`
+**接口路径：** `POST /agent/chat/stream`
 
-**认证**: 需要 Token（通过 `Authorization: Bearer <token>` 传递）
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
 
-**后端 DTO 定义**: `ConversationDTO.java`
+**Content-Type：** `application/json`
 
-```java
-// 后端 ConversationDTO 字段（确认版）
-@Data
-public class ConversationDTO {
-    private Long id;                    // 会话ID
-    private Long userId;                // 用户ID
-    private String title;               // 会话标题
-    private String lastMessageContent;  // 最新消息内容（预览，可为 null）
-    private LocalDateTime lastMessageTime;  // 最新消息时间（可为 null）
-    private LocalDateTime createdAt;    // 创建时间
-    private LocalDateTime updatedAt;    // 更新时间
-}
-```
-
-**响应格式**:
-```typescript
-{
-  code: 200,
-  message: "操作成功",
-  data: [
-    {
-      id: number;                // 会话 ID
-      userId: number;            // 用户 ID
-      title: string;             // 会话标题
-      lastMessageContent: string | null;  // ⭐ 最新消息内容（可为 null）
-      lastMessageTime: string | null;     // ⭐ 最新消息时间（ISO 8601 格式）
-      createdAt: string;         // 创建时间（ISO 8601 格式）
-      updatedAt: string;         // 更新时间（ISO 8601 格式）
-    }
-  ]
-}
-```
-
-**TypeScript 类型定义：**
-```typescript
-interface ConversationDTO {
-  id: number;
-  userId: number;
-  title: string;
-  lastMessageContent: string | null;
-  lastMessageTime: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-```
-
-**前端使用示例：**
-```tsx
-// 会话列表组件
-function ConversationList({ conversations }: { conversations: ConversationDTO[] }) {
-  return (
-    <ul>
-      {conversations.map(conv => (
-        <li key={conv.id}>
-          <h3>{conv.title}</h3>
-          {/* 显示最新消息预览 */}
-          {conv.lastMessageContent && (
-            <p className="last-message">
-              {conv.lastMessageContent.substring(0, 50)}...
-            </p>
-          )}
-          <time>
-            {conv.lastMessageTime 
-              ? new Date(conv.lastMessageTime).toLocaleString()
-              : '暂无消息'
-            }
-          </time>
-        </li>
-      ))}
-    </ul>
-  );
-}
-```
-
-### 3.2 获取消息列表
-
-**GET** `/conversation/{id}/messages`
-
-**认证**: 需要 Token（通过 `Authorization: Bearer <token>` 传递）
-
-**后端 DTO 定义**: `MessageDTO.java`
-
-```java
-// 后端 MessageDTO 字段（确认版）
-@Data
-public class MessageDTO {
-    private Long id;                // 消息ID
-    private Long conversationId;    // 会话ID
-    private Long userId;            // 用户ID
-    private String username;        // 用户名（可为 null）
-    private String role;            // 消息角色（user/assistant）
-    private String content;         // 消息内容
-    private String title;           // 消息标题（可为 null）
-    private LocalDateTime createdAt;  // 创建时间
-    private LocalDateTime updatedAt;  // 更新时间
-}
-```
-
-**响应格式**:
-```typescript
-{
-  code: 200,
-  message: "操作成功",
-  data: [
-    {
-      id: number;                // 消息 ID
-      conversationId: number;    // 会话 ID
-      userId: number;            // 用户 ID
-      username: string | null;   // ⭐ 用户名（可为 null）
-      role: string;              // 角色：user | assistant
-      content: string;           // 消息内容
-      title: string | null;      // 消息标题（可为 null）
-      createdAt: string;         // 创建时间（ISO 8601 格式）
-      updatedAt: string;         // 更新时间（ISO 8601 格式）
-    }
-  ]
-}
-```
-
-**TypeScript 类型定义（与后端 MessageDTO 完全对应）**:
-```typescript
-interface MessageDTO {
-  id: number;
-  conversationId: number;
-  userId: number;
-  username: string | null;
-  role: 'user' | 'assistant';
-  content: string;
-  title: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-```
-
-**前端使用示例**:
-```tsx
-// 消息列表组件
-function MessageList({ messages }: { messages: MessageDTO[] }) {
-  return (
-    <div className="messages">
-      {messages.map(msg => (
-        <div key={msg.id} className={`message ${msg.role}`}>
-          {/* 显示发送者用户名 */}
-          {msg.username && (
-            <div className="sender">{msg.username}</div>
-          )}
-          <div className="content">{msg.content}</div>
-          <time>
-            {new Date(msg.createdAt).toLocaleString()}
-          </time>
-        </div>
-      ))}
-    </div>
-  );
-}
-```
-
-### 3.3 删除会话
-
-**DELETE** `/conversation/{id}`
-
-**说明：** 逻辑删除，不会物理删除数据
-
-**响应：**
-```typescript
-{
-  code: 200,
-  message: "删除成功",
-  data: null
-}
-```
-
----
-
-## 4. SSE 流式对话接口
-
-### 4.1 发起流式对话
-
-**POST** `/agent/chat/stream`
+**响应类型：** `text/event-stream` (SSE)
 
 **请求体：**
 ```typescript
+interface StreamChatRequest {
+  message: string;         // 用户消息（必填）
+  conversationId?: number; // 会话 ID（可选，不传则自动创建）
+  sessionId?: string;      // 会话标识（可选）
+}
+```
+
+```json
 {
-  message: string;             // 必填：用户消息
-  conversationId?: number;     // 可选：已有会话 ID（首次不传则自动创建）
-  sessionId?: string;          // 可选：会话标识
+  "message": "你好，请帮我优化简历",
+  "conversationId": 123,
+  "sessionId": "optional-session-id"
 }
 ```
 
 **响应：** Server-Sent Events (SSE) 流
 
-**SSE 事件格式：**
+#### SSE 事件格式
+
+所有事件的 `data` 字段均为 **JSON 字符串**，需要 `JSON.parse()` 解析。
+
+##### Message ID 事件（⭐ 首个事件）
+
+```
+event: message_id
+data: {"messageId":"550e8400-e29b-41d4-a716-446655440000"}
+```
+
 ```typescript
-// chunk 事件
-interface ChunkData {
+interface SSEMessageIdData {
+  messageId: string;   // ⭐ 消息唯一标识（用于中断操作）
+}
+```
+
+**重要说明：**
+- ⭐ 这是 SSE 连接的**首个事件**
+- 前端应**立即保存** `messageId`
+- 在流式生成**进行中**可以使用此 ID 调用 abort 接口
+
+##### Chunk 事件（流式内容）
+
+```
+event: chunk
+id: chunk-0
+data: {"type":"chunk","content":"内容片段","index":0}
+```
+
+```typescript
+interface SSEChunkData {
   type: 'chunk';
-  content: string;            // AI 回复的片段
-  index: number;              // 片段索引
-  reasoning?: string;         // 推理过程（可选）
+  content: string;      // 当前生成的内容
+  index: number;        // chunk 序号（从0开始）
+  reasoning?: string;   // 可选：AI 思考过程
+  info?: string;        // 可选：附加信息
+  conversationId?: number;  // 可选：对话ID
 }
+```
 
-// done 事件
-interface DoneData {
+##### Done 事件（生成完成）⭐
+
+```
+event: done
+id: done-50
+data: {"type":"done","info":"对话完成总结","conversationId":123,"messageId":"UUID"}
+```
+
+```typescript
+interface SSEDoneData {
   type: 'done';
-  info: string;               // 完成信息
-  conversationId: number;     // 会话 ID
-  messageId: string;          // ⭐ 消息 ID（用于 abort）
+  info: string;              // 完成总结/标题
+  conversationId: number;    // 对话ID
+  messageId: string;         // ⭐ 重要：消息唯一标识（用于中断操作）
 }
+```
 
-// error 事件
-interface ErrorData {
+##### Error 事件（发生错误）
+
+```
+event: error
+data: {"type":"error","message":"错误信息"}
+```
+
+```typescript
+interface SSEErrorData {
   type: 'error';
-  message: string;            // 错误信息
+  message: string;   // 错误描述
 }
+```
 
-// ping 事件（心跳）
-interface PingData {
+##### Ping 事件（心跳）
+
+```
+event: ping
+data: {"type":"ping"}
+```
+
+```typescript
+interface SSEPingData {
   type: 'ping';
 }
 ```
 
-**前端对接示例：**
-```typescript
-import { fetchEventSource } from '@microsoft/fetch-event-source';
+**说明：** 心跳事件，每 **30 秒** 发送一次，用于保持连接活跃。前端可以忽略此事件。
 
-let currentMessageId: string | null = null;
-let currentConversationId: number | null = null;
+---
 
-async function startStreaming(message: string, conversationId?: number) {
-  await fetchEventSource('/agent/chat/stream', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ message, conversationId }),
-    
-    onmessage(event) {
-      const data = JSON.parse(event.data);
+### 2.2 非流式对话
 
-      switch (data.type) {
-        case 'chunk':
-          // 打字机效果显示
-          appendToAIResponse(data.content);
-          break;
-          
-        case 'done':
-          // ⭐ 保存 messageId 和 conversationId
-          currentMessageId = data.messageId;
-          currentConversationId = data.conversationId;
-          console.log('流式完成，conversationId:', data.conversationId);
-          break;
-          
-        case 'error':
-          showError(data.message);
-          break;
-          
-        case 'ping':
-          // 心跳，忽略
-          break;
-      }
-    },
-    
-    onerror(error) {
-      console.error('SSE 错误:', error);
-    },
-  });
-}
-```
+**接口路径：** `POST /agent/chat`
 
-### 4.2 中断流式生成
-
-**POST** `/agent/chat/stream/abort`
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
 
 **请求体：**
 ```typescript
+interface ChatRequest {
+  message: string;         // 用户消息（必填）
+  conversationId?: number; // 会话 ID（可选）
+}
+```
+
+```json
 {
-  messageId: string;  // 从 done 事件中获取
+  "message": "你好",
+  "conversationId": 123
 }
 ```
 
 **响应：**
 ```typescript
+interface ChatResponse {
+  reply: string;           // AI 回复内容
+  conversationId: number;  // 会话 ID
+}
+
+Result<ChatResponse>
+```
+
+```json
 {
-  code: 200,
-  data: boolean;  // true = 成功中断，false = 任务已结束
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "reply": "AI 回复内容",
+    "conversationId": 123
+  }
 }
 ```
-
-**前端使用示例：**
-```typescript
-async function abortGeneration() {
-  if (!currentMessageId) {
-    console.warn('没有活跃的流式任务');
-    return;
-  }
-
-  const response = await fetch('/agent/chat/stream/abort', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ messageId: currentMessageId }),
-  });
-
-  const result = await response.json();
-  
-  if (result.data) {
-    console.log('流式生成已中断');
-  } else {
-    console.log('任务已结束，无法中断');
-  }
-  
-  // 清除状态
-  currentMessageId = null;
-}
-```
-
-**⭐ 清理机制说明：**
-
-| 场景 | 后端行为 |
-|------|----------|
-| 新建会话 + abort | ✅ 删除空会话<br>✅ 删除用户消息<br>✅ 删除 Redis 数据 |
-| 已有会话 + abort | ✅ 保留会话<br>✅ 删除本次用户消息<br>✅ 删除 Redis 数据 |
-
-**前端无需额外处理，后端会自动清理。**
-
-### 4.3 中断流式生成（RESTful）
-
-**POST** `/api/v1/chat/{conversationId}/abort`
-
-通过 conversationId 中断该会话下最新的活跃流。
-
-**使用场景：** 当你不知道 messageId，但知道 conversationId 时可以使用。
 
 ---
 
-## 5. 管理员接口
+### 2.3 中断流式生成（推荐）
+
+**接口路径：** `POST /agent/chat/stream/abort`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
+
+**请求体：**
+```typescript
+interface AbortRequest {
+  messageId: string;   // 消息 ID（UUID，从 done 事件中获取）
+}
+```
+
+```json
+{
+  "messageId": "0bb96056-a78d-4d4b-9f73-e373a2c7b5e3"
+}
+```
+
+**响应：**
+```typescript
+Result<boolean>   // true=成功中断，false=任务已结束
+```
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": true
+}
+```
+
+---
+
+### 2.4 中断流式生成（RESTful）
+
+**接口路径：** `POST /agent/api/v1/chat/{conversationId}/abort`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
+
+**路径参数：**
+```typescript
+{
+  conversationId: number;   // 会话 ID
+}
+```
+
+**响应：**
+```typescript
+Result<boolean>
+```
+
+---
+
+### 2.5 断线恢复
+
+**接口路径：** `GET /agent/chat/stream/recover`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
+
+**查询参数：**
+```typescript
+{
+  conversationId: number;   // 会话 ID（必填）
+  messageId: string;        // 消息 ID（必填）
+  lastEventId?: string;     // 最后接收到的事件 ID（可选）
+}
+```
+
+**示例：**
+```
+GET /agent/chat/stream/recover?conversationId=123&messageId=0bb96056-a78d-4d4b-9f73-e373a2c7b5e3&lastEventId=chunk-10
+```
+
+**响应：** Server-Sent Events (SSE) 流（replay 历史 chunk）
+
+---
+
+## 3. 会话管理模块
+
+### 3.1 获取会话列表
+
+**接口路径：** `GET /conversation/list`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
+
+**响应：**
+```typescript
+interface ConversationDTO {
+  id: number;                // 会话 ID
+  userId: number;            // 用户 ID
+  title: string;             // 会话标题
+  lastMessageContent: string; // 最新消息内容（预览）
+  lastMessageTime: string;   // 最新消息时间 (ISO 8601)
+  createdAt: string;         // 创建时间 (ISO 8601)
+  updatedAt: string;         // 更新时间 (ISO 8601)
+}
+
+Result<ConversationDTO[]>
+```
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": [
+    {
+      "id": 1,
+      "userId": 1,
+      "title": "求职助手",
+      "lastMessageContent": "你好！我是你的求职助手...",
+      "lastMessageTime": "2026-04-10T12:00:00",
+      "createdAt": "2026-04-10T10:00:00",
+      "updatedAt": "2026-04-10T12:00:00"
+    }
+  ]
+}
+```
+
+---
+
+### 3.2 获取消息列表
+
+**接口路径：** `GET /conversation/{id}/messages`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
+
+**路径参数：**
+```typescript
+{
+  id: number;   // 会话 ID
+}
+```
+
+**响应：**
+```typescript
+interface MessageDTO {
+  id: number;              // 消息 ID
+  conversationId: number;  // 会话 ID
+  userId: number;          // 用户 ID
+  username: string;        // 用户名
+  role: string;            // 消息角色（user/assistant）
+  content: string;         // 消息内容
+  title: string;           // 消息标题
+  createdAt: string;       // 创建时间 (ISO 8601)
+  updatedAt: string;       // 更新时间 (ISO 8601)
+}
+
+Result<MessageDTO[]>
+```
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": [
+    {
+      "id": 1,
+      "conversationId": 1,
+      "userId": 1,
+      "username": "testuser",
+      "role": "user",
+      "content": "你好",
+      "title": null,
+      "createdAt": "2026-04-10T10:00:00",
+      "updatedAt": "2026-04-10T10:00:00"
+    }
+  ]
+}
+```
+
+---
+
+### 3.3 删除会话
+
+**接口路径：** `DELETE /conversation/{id}`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>`
+
+**路径参数：**
+```typescript
+{
+  id: number;   // 会话 ID
+}
+```
+
+**响应：**
+```typescript
+Result<string>   // "删除成功"
+```
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": "删除成功"
+}
+```
+
+**说明：** 逻辑删除会话和关联消息（软删除）
+
+---
+
+## 4. 用户模块
+
+### 4.1 获取用户信息
+
+**接口路径：** `GET /user/{id}`
+
+**路径参数：**
+```typescript
+{
+  id: number;   // 用户 ID
+}
+```
+
+**响应：**
+```typescript
+interface UserDTO {
+  id: number;          // 用户 ID
+  username: string;    // 用户名
+  email: string;       // 邮箱地址
+  role: string;        // 用户角色（USER/ADMIN）
+  status: number;      // 状态（1=激活, 0=禁用）
+  statusText: string;  // 状态文本
+}
+
+Result<UserDTO>
+```
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "id": 1,
+    "username": "testuser",
+    "email": "test@example.com",
+    "role": "USER",
+    "status": 1,
+    "statusText": "激活"
+  }
+}
+```
+
+---
+
+### 4.2 更新用户信息
+
+**接口路径：** `PUT /user/{id}`
+
+**路径参数：**
+```typescript
+{
+  id: number;   // 用户 ID
+}
+```
+
+**请求体：**（所有字段可选）
+```typescript
+interface UserUpdateRequest {
+  username?: string;   // 用户名
+  email?: string;      // 邮箱地址
+  role?: string;       // 用户角色
+  status?: string;     // 用户状态
+}
+```
+
+```json
+{
+  "username": "updatedUsername",
+  "email": "updated@example.com"
+}
+```
+
+**响应：**
+```typescript
+Result<string>   // "更新成功"
+```
+
+---
+
+## 5. 管理员模块
+
+所有接口均需 **ADMIN 角色**权限。
 
 ### 5.1 获取用户列表
 
-**GET** `/api/admin/users?page=1&pageSize=10&keyword=admin&role=USER&status=ACTIVE`
+**接口路径：** `GET /api/admin/users`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>` + ADMIN 角色
+
+**查询参数：**
+```typescript
+interface UserListRequest {
+  page?: number;         // 页码（默认 1）
+  pageSize?: number;     // 每页数量（默认 10，最大 100）
+  keyword?: string;      // 搜索关键词（匹配用户名或邮箱）
+  role?: string;         // 角色筛选（ADMIN/USER）
+  status?: string;       // 状态筛选（ACTIVE/DISABLED）
+}
+```
+
+**示例：**
+```
+GET /api/admin/users?page=1&pageSize=10&keyword=admin&role=USER&status=ACTIVE
+```
 
 **响应：**
 ```typescript
+interface AdminUserDTO {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  status: string;
+  createdAt: string;
+}
+
+interface UserListResponse {
+  list: AdminUserDTO[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+Result<UserListResponse>
+```
+
+```json
 {
-  code: 200,
-  data: {
-    list: Array<{
-      id: number;
-      username: string;
-      email: string;
-      role: string;
-      status: string;      // "ACTIVE" | "DISABLED"
-      createdAt: string;
-    }>;
-    total: number;
-    page: number;
-    pageSize: number;
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "username": "admin",
+        "email": "admin@example.com",
+        "role": "ADMIN",
+        "status": "ACTIVE",
+        "createdAt": "2026-04-10T10:00:00"
+      }
+    ],
+    "total": 100,
+    "page": 1,
+    "pageSize": 10
   }
 }
 ```
 
+---
+
 ### 5.2 创建用户
 
-**POST** `/api/admin/users`
+**接口路径：** `POST /api/admin/users`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>` + ADMIN 角色
 
 **请求体：**
 ```typescript
-{
-  username: string;
-  email: string;
-  password: string;       // 至少 6 位
-  role: 'ADMIN' | 'USER';
-  status: 'ACTIVE' | 'DISABLED';
+interface UserCreateRequest {
+  username: string;   // 用户名（3-50字符，必填）
+  email: string;      // 邮箱地址（必填）
+  password: string;   // 密码（至少6位，必填）
+  role: string;       // 角色（ADMIN/USER，必填）
+  status: string;     // 状态（ACTIVE/DISABLED，必填）
 }
 ```
+
+```json
+{
+  "username": "newuser",
+  "email": "user@example.com",
+  "password": "password123",
+  "role": "USER",
+  "status": "ACTIVE"
+}
+```
+
+**响应：**
+```typescript
+Result<AdminUserDTO>
+```
+
+---
 
 ### 5.3 更新用户
 
-**PUT** `/api/admin/users/{id}`
+**接口路径：** `PUT /api/admin/users/{id}`
 
-**请求体（所有字段可选）：**
+**认证：** 需要 `Authorization: Bearer <TOKEN>` + ADMIN 角色
+
+**路径参数：**
 ```typescript
 {
-  username?: string;
-  email?: string;
-  password?: string;      // 如果提供，会自动加密
-  role?: 'ADMIN' | 'USER';
-  status?: 'ACTIVE' | 'DISABLED';
+  id: number;   // 用户 ID
 }
 ```
+
+**请求体：**（所有字段可选）
+```typescript
+interface UserUpdateRequest {
+  username?: string;   // 用户名（3-50字符）
+  email?: string;      // 邮箱地址
+  password?: string;   // 新密码（至少6位，留空则不修改）
+  role?: string;       // 角色
+  status?: string;     // 状态
+}
+```
+
+**响应：**
+```typescript
+Result<AdminUserDTO>
+```
+
+---
 
 ### 5.4 删除用户
 
-**DELETE** `/api/admin/users/{id}`
+**接口路径：** `DELETE /api/admin/users/{id}`
 
-**说明：** 逻辑删除，删除后用户数据不会真正从数据库移除，只是标记为已删除。
+**认证：** 需要 `Authorization: Bearer <TOKEN>` + ADMIN 角色
 
-**前端注意：** 删除后该用户不会再出现在列表中。
-
-### 5.5 切换用户状态
-
-**PATCH** `/api/admin/users/{id}/toggle-status`
-
-**说明：** 在 ACTIVE 和 DISABLED 之间切换
-
----
-
-## 6. 数据类型对照表
-
-### 时间格式
-
-所有时间字段均为 **ISO 8601** 格式：
-
+**路径参数：**
 ```typescript
-// 示例
-"2026-04-10T12:00:00"        // 本地时间
-"2026-04-10T12:00:00Z"       // UTC 时间
-
-// 前端转换
-const date = new Date("2026-04-10T12:00:00");
-const formatted = date.toLocaleString('zh-CN');  // "2026/4/10 12:00:00"
-```
-
-### 状态码
-
-**用户状态：**
-- `status: 1` 或 `statusText: "ACTIVE"` → 启用
-- `status: 0` 或 `statusText: "DISABLED"` → 禁用
-
-**角色：**
-- `"ADMIN"` → 管理员
-- `"USER"` → 普通用户
-
-**消息角色：**
-- `"user"` → 用户消息
-- `"assistant"` → AI 回复
-
----
-
-## 7. 前端迁移指南
-
-### 从旧版本升级
-
-如果你的前端代码已经在运行，需要进行以下调整：
-
-#### 7.1 会话列表适配
-
-**旧代码：**
-```typescript
-// 旧的数据结构
-interface OldConversation {
-  id: number;
-  userId: number;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
+{
+  id: number;   // 用户 ID
 }
 ```
 
-**新代码：**
+**响应：**
 ```typescript
-// 新的数据结构
+Result<null>
+```
+
+**说明：** 逻辑删除用户（软删除）
+
+---
+
+### 5.5 切换用户状态
+
+**接口路径：** `PATCH /api/admin/users/{id}/toggle-status`
+
+**认证：** 需要 `Authorization: Bearer <TOKEN>` + ADMIN 角色
+
+**路径参数：**
+```typescript
+{
+  id: number;   // 用户 ID
+}
+```
+
+**响应：**
+```typescript
+Result<AdminUserDTO>
+```
+
+**说明：** 在 `ACTIVE` 和 `DISABLED` 之间切换
+
+---
+
+## 6. TypeScript 类型定义
+
+### 完整类型定义文件
+
+```typescript
+// ==================== 通用类型 ====================
+
+interface Result<T> {
+  code: number;
+  message: string;
+  data: T;
+}
+
+// ==================== 认证模块 ====================
+
+interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+interface RegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+}
+
+interface LoginResponse {
+  token: string;
+  userId: number;
+  username: string;
+  role: string;
+}
+
+interface CurrentUserResponse {
+  userId: number;
+  username: string;
+  role: string;
+  status: number;
+  statusText: string;
+}
+
+// ==================== 流式对话模块 ====================
+
+interface StreamChatRequest {
+  message: string;
+  conversationId?: number;
+  sessionId?: string;
+}
+
+interface ChatRequest {
+  message: string;
+  conversationId?: number;
+}
+
+interface ChatResponse {
+  reply: string;
+  conversationId: number;
+}
+
+interface AbortRequest {
+  messageId: string;
+}
+
+// SSE 事件数据类型
+interface SSEMessageIdData {
+  messageId: string;
+}
+
+interface SSEChunkData {
+  type: 'chunk';
+  content: string;
+  index: number;
+  reasoning?: string;
+  info?: string;
+  conversationId?: number;
+}
+
+interface SSEDoneData {
+  type: 'done';
+  info: string;
+  conversationId: number;
+  messageId: string;
+}
+
+interface SSEErrorData {
+  type: 'error';
+  message: string;
+}
+
+interface SSEPingData {
+  type: 'ping';
+}
+
+// ==================== 会话管理模块 ====================
+
 interface ConversationDTO {
   id: number;
   userId: number;
   title: string;
-  lastMessageContent: string | null;  // ⭐ 新增
-  lastMessageTime: string | null;     // ⭐ 新增
+  lastMessageContent: string;
+  lastMessageTime: string;
   createdAt: string;
   updatedAt: string;
 }
-
-// 使用新增字段
-function renderConversation(conv: ConversationDTO) {
-  return (
-    <div>
-      <h3>{conv.title}</h3>
-      <p>{conv.lastMessageContent?.substring(0, 50) || '暂无消息'}</p>
-      <time>{conv.lastMessageTime ? format(conv.lastMessageTime) : '暂无消息'}</time>
-    </div>
-  );
-}
-```
-
-#### 7.2 消息列表适配
-
-**旧代码：**
-```typescript
-// 旧的数据结构（没有 username）
-interface OldMessage {
-  id: number;
-  userId: number;
-  role: string;
-  content: string;
-  createdAt: string;
-}
-```
-
-**新代码：**
-```typescript
-// 新的数据结构
-interface MessageDTO {
-  id: number;
-  userId: number;
-  username: string | null;  // ⭐ 新增
-  role: string;
-  content: string;
-  createdAt: string;
-}
-
-// 使用新增的 username
-function renderMessage(msg: MessageDTO) {
-  return (
-    <div className={msg.role}>
-      {msg.username && <span>{msg.username}</span>}  {/* ⭐ 显示用户名 */}
-      <p>{msg.content}</p>
-      <time>{format(msg.createdAt)}</time>
-    </div>
-  );
-}
-```
-
-#### 7.3 用户信息适配
-
-**旧代码：**
-```typescript
-// 旧的数据结构（包含 password）
-interface OldUser {
-  id: number;
-  username: string;
-  email: string;
-  password: string | null;  // 以前有，现在没有
-  role: string;
-}
-```
-
-**新代码：**
-```typescript
-// 新的数据结构（不含 password）
-interface UserDTO {
-  id: number;
-  username: string;
-  email: string;
-  role: string;
-  status: number;           // ⭐ 新增
-  statusText: string;       // ⭐ 新增
-}
-
-// 不再需要手动清除密码
-const user = await fetchUser(id);
-// user.password 现在是 undefined（不再存在）
-```
-
----
-
-## 8. 完整示例
-
-### 8.1 会话页面完整示例
-
-```tsx
-import { useState, useEffect } from 'react';
 
 interface MessageDTO {
   id: number;
   conversationId: number;
   userId: number;
-  username: string | null;
-  role: 'user' | 'assistant';
+  username: string;
+  role: string;
   content: string;
-  title: string | null;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ==================== 用户模块 ====================
+
+interface UserDTO {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  status: number;
+  statusText: string;
+}
+
+interface UserUpdateRequest {
+  username?: string;
+  email?: string;
+  role?: string;
+  status?: string;
+}
+
+// ==================== 管理员模块 ====================
+
+interface UserListRequest {
+  page?: number;
+  pageSize?: number;
+  keyword?: string;
+  role?: string;
+  status?: string;
+}
+
+interface AdminUserDTO {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  status: string;
   createdAt: string;
 }
 
-export function ConversationPage({ conversationId }: { conversationId: number }) {
-  const [messages, setMessages] = useState<MessageDTO[]>([]);
-  const [loading, setLoading] = useState(true);
+interface UserListResponse {
+  list: AdminUserDTO[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
 
-  useEffect(() => {
-    async function loadMessages() {
-      try {
-        const response = await fetch(`/conversation/${conversationId}/messages`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const result = await response.json();
-        
-        if (result.code === 200) {
-          setMessages(result.data);
+interface UserCreateRequest {
+  username: string;
+  email: string;
+  password: string;
+  role: string;
+  status: string;
+}
+```
+
+---
+
+## 7. 完整示例代码
+
+### 7.1 API 客户端封装
+
+```typescript
+// api/client.ts
+
+const BASE_URL = '/agent';
+
+class ApiClient {
+  private getToken(): string | null {
+    return localStorage.getItem('token');
+  }
+
+  private getHeaders(extraHeaders: HeadersInit = {}): HeadersInit {
+    const token = this.getToken();
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...extraHeaders,
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return headers;
+  }
+
+  private async handleResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result: Result<T> = await response.json();
+
+    if (result.code !== 200) {
+      throw new Error(result.message || '请求失败');
+    }
+
+    return result.data;
+  }
+
+  // ==================== 认证接口 ====================
+
+  async login(data: LoginRequest): Promise<LoginResponse> {
+    const response = await fetch('/auth/login', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    const result = await this.handleResponse<LoginResponse>(response);
+
+    // 保存 token
+    localStorage.setItem('token', result.token);
+    localStorage.setItem('userId', String(result.userId));
+
+    return result;
+  }
+
+  async register(data: RegisterRequest): Promise<string> {
+    const response = await fetch('/auth/register', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    return this.handleResponse<string>(response);
+  }
+
+  async getCurrentUser(): Promise<CurrentUserResponse> {
+    const response = await fetch('/auth/me', {
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<CurrentUserResponse>(response);
+  }
+
+  logout(): void {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userId');
+  }
+
+  // ==================== 流式对话接口 ====================
+
+  async streamChat(data: StreamChatRequest): Promise<EventSource> {
+    // 注意：SSE 需要使用 fetch + ReadableStream 或者 EventSource
+    // 这里使用 EventSource 的封装（需要额外处理 POST）
+    return new Promise((resolve, reject) => {
+      // 实现细节见下方的 StreamChatClient 类
+    });
+  }
+
+  async abortStream(messageId: string): Promise<boolean> {
+    const response = await fetch(`${BASE_URL}/chat/stream/abort`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ messageId }),
+    });
+
+    return this.handleResponse<boolean>(response);
+  }
+
+  async nonStreamChat(data: ChatRequest): Promise<ChatResponse> {
+    const response = await fetch(`${BASE_URL}/chat`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    return this.handleResponse<ChatResponse>(response);
+  }
+
+  // ==================== 会话管理接口 ====================
+
+  async getConversations(): Promise<ConversationDTO[]> {
+    const response = await fetch(`${BASE_URL}/conversation/list`, {
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<ConversationDTO[]>(response);
+  }
+
+  async getMessages(conversationId: number): Promise<MessageDTO[]> {
+    const response = await fetch(
+      `${BASE_URL}/conversation/${conversationId}/messages`,
+      {
+        headers: this.getHeaders(),
+      }
+    );
+
+    return this.handleResponse<MessageDTO[]>(response);
+  }
+
+  async deleteConversation(conversationId: number): Promise<string> {
+    const response = await fetch(
+      `${BASE_URL}/conversation/${conversationId}`,
+      {
+        method: 'DELETE',
+        headers: this.getHeaders(),
+      }
+    );
+
+    return this.handleResponse<string>(response);
+  }
+
+  // ==================== 用户接口 ====================
+
+  async getUser(userId: number): Promise<UserDTO> {
+    const response = await fetch(`/user/${userId}`, {
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<UserDTO>(response);
+  }
+
+  async updateUser(
+    userId: number,
+    data: UserUpdateRequest
+  ): Promise<string> {
+    const response = await fetch(`/user/${userId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    return this.handleResponse<string>(response);
+  }
+
+  // ==================== 管理员接口 ====================
+
+  async getUserList(
+    params: UserListRequest
+  ): Promise<UserListResponse> {
+    const queryParams = new URLSearchParams();
+
+    if (params.page) queryParams.set('page', String(params.page));
+    if (params.pageSize) queryParams.set('pageSize', String(params.pageSize));
+    if (params.keyword) queryParams.set('keyword', params.keyword);
+    if (params.role) queryParams.set('role', params.role);
+    if (params.status) queryParams.set('status', params.status);
+
+    const response = await fetch(
+      `/api/admin/users?${queryParams.toString()}`,
+      {
+        headers: this.getHeaders(),
+      }
+    );
+
+    return this.handleResponse<UserListResponse>(response);
+  }
+
+  async createUser(data: UserCreateRequest): Promise<AdminUserDTO> {
+    const response = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    return this.handleResponse<AdminUserDTO>(response);
+  }
+
+  async updateUserByAdmin(
+    userId: number,
+    data: UserUpdateRequest
+  ): Promise<AdminUserDTO> {
+    const response = await fetch(`/api/admin/users/${userId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    return this.handleResponse<AdminUserDTO>(response);
+  }
+
+  async deleteUser(userId: number): Promise<void> {
+    const response = await fetch(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<void>(response);
+  }
+
+  async toggleUserStatus(userId: number): Promise<AdminUserDTO> {
+    const response = await fetch(
+      `/api/admin/users/${userId}/toggle-status`,
+      {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+      }
+    );
+
+    return this.handleResponse<AdminUserDTO>(response);
+  }
+}
+
+export const apiClient = new ApiClient();
+```
+
+---
+
+### 7.2 流式对话客户端
+
+```typescript
+// api/stream.ts
+
+class StreamChatClient {
+  private abortController: AbortController | null = null;
+  private messageId: string | null = null;
+  private currentContent = '';
+
+  async streamChat(
+    message: string,
+    options?: {
+      conversationId?: number;
+      onMessageId?: (messageId: string) => void;  // ⭐ 新增
+      onChunk?: (content: string) => void;
+      onDone?: (info: string) => void;
+      onError?: (error: string) => void;
+    }
+  ): Promise<void> {
+    const token = localStorage.getItem('token');
+
+    const response = await fetch('/agent/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        message,
+        conversationId: options?.conversationId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let eventType = '';
+        let eventData = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            eventData = line.slice(5).trim();
+
+            if (eventType && eventData) {
+              this.handleSseEvent(eventType, eventData, options);
+              eventType = '';
+              eventData = '';
+            }
+          }
         }
-      } catch (error) {
-        console.error('加载消息失败:', error);
+      }
+    } catch (error) {
+      console.error('流式读取失败:', error);
+      options?.onError?.('网络错误');
+    }
+  }
+
+  private handleSseEvent(
+    eventType: string,
+    eventData: string,
+    options?: any
+  ): void {
+    try {
+      const data = JSON.parse(eventData);
+
+      switch (eventType) {
+        case 'message_id':
+          // ⭐ 首个事件，保存 messageId
+          this.messageId = data.messageId;
+          console.debug('获取 messageId:', data.messageId);
+          break;
+
+        case 'chunk':
+          this.currentContent += data.content || '';
+          options?.onChunk?.(this.currentContent);
+          break;
+
+        case 'done':
+          // done 事件中也包含 messageId（用于确认）
+          if (data.messageId) {
+            console.log('流式完成，确认 messageId:', data.messageId);
+          }
+          options?.onDone?.(data.info);
+          break;
+
+        case 'error':
+          options?.onError?.(data.message);
+          break;
+
+        case 'ping':
+          // 心跳事件，可以忽略或用于检测连接状态
+          console.debug('心跳');
+          break;
+
+        default:
+          console.warn('未知事件类型:', eventType, data);
+      }
+    } catch (error) {
+      console.error('解析 SSE 数据失败:', error);
+    }
+  }
+
+  // 中断流式生成
+  async abort(): Promise<boolean> {
+    if (!this.messageId) {
+      console.warn('没有活跃的流式任务');
+      return false;
+    }
+
+    const token = localStorage.getItem('token');
+
+    const response = await fetch('/agent/chat/stream/abort', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ messageId: this.messageId }),
+    });
+
+    const result = await response.json();
+    return result.data;
+  }
+
+  // 获取当前 messageId
+  getMessageId(): string | null {
+    return this.messageId;
+  }
+}
+
+export const streamChatClient = new StreamChatClient();
+```
+
+---
+
+### 7.3 React Hooks 示例
+
+```typescript
+// hooks/useStreamChat.ts
+
+import { useState, useCallback, useRef } from 'react';
+
+export function useStreamChat() {
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const messageIdRef = useRef<string | null>(null);  // ⭐ 使用 ref 保存 messageId
+
+  const streamChat = useCallback(
+    async (message: string, conversationId?: number) => {
+      setLoading(true);
+      setError(null);
+      setContent('');
+      messageIdRef.current = null;  // 重置 messageId
+
+      try {
+        await streamChatClient.streamChat(message, {
+          conversationId,
+          onMessageId: (id) => {
+            // ⭐ 立即保存 messageId（首个事件）
+            messageIdRef.current = id;
+            console.log('获取 messageId:', id);
+          },
+          onChunk: (newContent) => {
+            setContent(newContent);
+          },
+          onDone: (info) => {
+            console.log('完成:', info);
+          },
+          onError: (errorMsg) => {
+            setError(errorMsg);
+          },
+        });
+      } catch (err: any) {
+        setError(err.message);
       } finally {
         setLoading(false);
       }
-    }
-
-    loadMessages();
-  }, [conversationId]);
-
-  if (loading) return <div>加载中...</div>;
-
-  return (
-    <div className="conversation">
-      {messages.map(msg => (
-        <div key={msg.id} className={`message ${msg.role}`}>
-          {/* 显示发送者用户名 */}
-          {msg.username && (
-            <div className="sender-name">{msg.username}</div>
-          )}
-          <div className="content">{msg.content}</div>
-          <div className="timestamp">
-            {new Date(msg.createdAt).toLocaleString('zh-CN')}
-          </div>
-        </div>
-      ))}
-    </div>
+    },
+    []
   );
-}
-```
 
-### 8.2 会话列表完整示例
-
-```tsx
-import { useState, useEffect } from 'react';
-
-interface ConversationDTO {
-  id: number;
-  userId: number;
-  title: string;
-  lastMessageContent: string | null;
-  lastMessageTime: string | null;
-  createdAt: string;
-}
-
-export function ConversationList() {
-  const [conversations, setConversations] = useState<ConversationDTO[]>([]);
-
-  useEffect(() => {
-    async function loadConversations() {
-      const response = await fetch('/conversation/list', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      
-      if (result.code === 200) {
-        setConversations(result.data);
-      }
+  const abort = useCallback(async () => {
+    if (!messageIdRef.current) {
+      console.warn('尚未获取 messageId，无法中断');
+      return false;
     }
-
-    loadConversations();
+    
+    const success = await streamChatClient.abort();
+    if (success) {
+      setLoading(false);
+    }
+    return success;
   }, []);
 
-  return (
-    <ul className="conversation-list">
-      {conversations.map(conv => (
-        <li key={conv.id}>
-          <h3>{conv.title}</h3>
-          {/* 最新消息预览 */}
-          {conv.lastMessageContent && (
-            <p className="preview">
-              {conv.lastMessageContent.substring(0, 50)}...
-            </p>
-          )}
-          <time>
-            {conv.lastMessageTime 
-              ? new Date(conv.lastMessageTime).toLocaleString('zh-CN')
-              : '暂无消息'
-            }
-          </time>
-        </li>
-      ))}
-    </ul>
-  );
+  return {
+    content,
+    loading,
+    error,
+    messageId: messageIdRef.current,
+    streamChat,
+    abort,
+  };
 }
 ```
+
+---
+
+## 8. 重要注意事项
+
+### 8.1 认证
+
+- 所有需要认证的接口都必须在请求头中包含 `Authorization: Bearer <TOKEN>`
+- Token 通过登录接口获取
+- Token 过期时会返回 `401 Unauthorized`
+
+### 8.2 超时时间
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| SSE 空闲超时 | 600 秒（10分钟） | 连接空闲超时 |
+| 任务超时 | 30 分钟 | 从开始到完成的总时间 |
+| 心跳间隔 | 30 秒 | 自动发送 ping 事件 |
+| Redis TTL | 3600 秒 | chunk 数据过期时间 |
+
+### 8.3 错误码
+
+| 错误码 | 说明 |
+|--------|------|
+| 200 | 成功 |
+| 400 | 请求参数错误 |
+| 401 | 未认证（Token 无效或过期） |
+| 403 | 权限不足 |
+| 404 | 资源不存在 |
+| 500 | 服务器内部错误 |
+
+### 8.4 messageId 的重要性
+
+- `messageId` 是从 `done` 事件中获取的唯一标识
+- 用于后续的 **中断操作**
+- 必须在流完成后才能获取
+- 每个流式请求对应一个唯一的 `messageId`
+
+### 8.5 Abort 清理机制
+
+中断流式生成时，后端会自动清理：
+- ✅ Redis 中的临时 chunk 数据
+- ✅ 用户消息记录
+- ✅ 如果是新建的空会话，会自动删除
 
 ---
 
 ## 9. 常见问题
 
-### Q1: 为什么消息列表现在返回 username？
+### Q1: 如何处理 SSE 断线？
 
-**A:** 为了避免前端需要额外请求用户信息。以前获取消息列表后，前端需要针对每条消息调用用户接口获取用户名（N+1 问题），现在后端一次性批量返回，提升了性能。
+使用断线恢复接口，传入 `lastEventId` 可以继续接收未完成的流。
 
-### Q2: 会话列表的 `lastMessageContent` 是什么？
+### Q2: 为什么需要心跳机制？
 
-**A:** 这是该会话的最后一条消息内容，用于在列表页显示预览。如果会话没有任何消息，该字段为 `null`。
+防止中间件（Nginx、负载均衡器）因空闲断开连接。前端可以忽略 ping 事件。
 
-### Q3: Abort 后前端需要做什么清理？
+### Q3: 如何区分用户消息和 AI 消息？
 
-**A:** 几乎不需要。后端会自动清理：
-- ✅ Redis 临时数据
-- ✅ 未完成的用户消息
-- ✅ 如果是新建会话，会删除空会话
-
-前端只需要清除自己的状态（如 `currentMessageId = null`）。
-
-### Q4: 时间格式如何解析？
-
-**A:** 所有时间都是 ISO 8601 格式，直接用 `new Date(string)` 即可：
-```typescript
-const date = new Date("2026-04-10T12:00:00");
-const formatted = date.toLocaleString('zh-CN');  // "2026/4/10 12:00:00"
-```
-
-### Q5: 用户接口为什么不返回密码了？
-
-**A:** 出于安全考虑，密码属于敏感信息，不应通过 API 返回。如果需要验证密码，请使用专门的密码验证接口。
+通过 `MessageDTO` 中的 `role` 字段：
+- `user`：用户消息
+- `assistant`：AI 消息
 
 ---
 
-## 10. 错误处理
-
-### 常见错误码
-
-| 错误码 | 说明 | 前端处理 |
-|--------|------|----------|
-| 200 | 成功 | 正常处理 |
-| 400 | 请求参数错误 | 提示用户检查输入 |
-| 401 | 未认证/Token 无效 | 跳转到登录页 |
-| 403 | 权限不足 | 提示用户无权限 |
-| 404 | 资源不存在 | 提示用户资源不存在 |
-| 409 | 资源冲突（如用户名已存在） | 提示具体冲突信息 |
-| 500 | 服务器内部错误 | 提示用户稍后重试 |
-
-### 错误处理示例
-
-```typescript
-async function handleApiCall() {
-  try {
-    const response = await fetch('/api/endpoint', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const result = await response.json();
-
-    if (result.code === 200) {
-      // 成功
-      return result.data;
-    } else if (result.code === 401) {
-      // Token 无效，跳转到登录
-      localStorage.removeItem('token');
-      window.location.href = '/login';
-    } else {
-      // 其他错误
-      showError(result.message);
-    }
-  } catch (error) {
-    console.error('网络错误:', error);
-    showError('网络异常，请稍后重试');
-  }
-}
-```
-
----
-
-## 11. 性能优化建议
-
-### 11.1 利用批量查询优势
-
-现在后端已经优化了批量查询，前端无需额外优化。但可以注意：
-
-- ✅ **消息列表**：一次性加载所有消息，无需循环请求用户信息
-- ✅ **会话列表**：直接显示最新消息预览，无需额外请求
-
-### 11.2 合理使用 Abort
-
-- ✅ 用户切换到其他会话时，调用 abort 中断当前流式生成
-- ✅ 用户关闭页面时，浏览器会自动断开 SSE 连接，后端会检测到并触发 abort
-
-```typescript
-// 切换会话时
-async function switchConversation(newConversationId: number) {
-  // 先中断当前的流式生成（如果有）
-  if (currentMessageId) {
-    await abortGeneration();
-  }
-  
-  // 加载新会话
-  loadMessages(newConversationId);
-}
-```
-
----
-
-**文档版本**: v3.0
-**更新日期**: 2026-04-10
-**维护者**: 后端团队
-
-## 相关文档
-
-- [Agent 服务对接文档](./agent-api.md) - Python Agent (LangChain + LangGraph + DeepSeek) 数据结构
-- [SSE 流式对话完整指南](./SSE_ABORT_GUIDE.md) - 流式对话和 abort 机制详解
-
-如有疑问，请联系后端开发团队。
+**文档版本：** v2.0  
+**最后更新：** 2026-04-12

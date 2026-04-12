@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { createSSEConnection, SSEHandlers, SEDoneData, SEEErrorData } from '../services/sse';
 import { abortStreamGeneration } from '../services/sseAbort';
+import { recoverSSEConnection } from '../services/sseRecover';
 import { getConversationMessages } from '../services/conversation';
 import { Message, MessageDTO } from '../types';
 
@@ -21,6 +22,7 @@ interface UseSSEChatReturn {
   resetChatState: () => void;
   setConversationId: (id: number | null) => void; // 手动设置会话 ID
   loadConversation: (id: number) => Promise<void>; // 加载历史消息
+  recoverStream: (conversationId: number, messageId: string, lastEventId?: string) => void; // 断线恢复
 }
 
 /**
@@ -110,7 +112,7 @@ export function useSSEChat(): UseSSEChatReturn {
       },
 
       onDone: (data: SEDoneData) => {
-        console.debug('[SSE] Stream completed, total_tokens:', data.total_tokens);
+        console.debug('[SSE] Stream completed, messageId:', data.messageId);
 
         // 将流式消息添加到消息列表
         if (streamingBufferRef.current || streamingReasoningBufferRef.current) {
@@ -260,6 +262,101 @@ export function useSSEChat(): UseSSEChatReturn {
     }
   }, []);
 
+  // 断线恢复
+  const recoverStream = useCallback(async (conversationId: number, messageId: string, lastEventId?: string) => {
+    // 清除之前的连接
+    closeConnection();
+
+    // 创建新的 AbortController
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    // 清除之前的错误
+    setError(null);
+    setMessageId(messageId);
+    messageIdRef.current = messageId;
+
+    // 设置加载状态
+    setIsLoading(true);
+
+    // 创建 SSE 处理器
+    const handlers: SSEHandlers = {
+      onMessageId: (newMessageId: string) => {
+        if (!messageIdRef.current) {
+          messageIdRef.current = newMessageId;
+          setMessageId(newMessageId);
+          console.debug('[SSE Recover] Received messageId:', newMessageId);
+        }
+      },
+
+      onChunk: (content: string, _index: number) => {
+        streamingBufferRef.current += content;
+        flushSync(() => {
+          setCurrentStreamingMessage(streamingBufferRef.current);
+        });
+      },
+
+      onReasoning: (reasoning: string, _index: number) => {
+        streamingReasoningBufferRef.current += reasoning;
+        flushSync(() => {
+          setCurrentStreamingReasoning(streamingReasoningBufferRef.current);
+        });
+      },
+
+      onConversationId: (newConversationId: number) => {
+        setConversationId(newConversationId);
+        console.debug('[SSE Recover] Received conversationId:', newConversationId);
+      },
+
+      onDone: (data: SEDoneData) => {
+        console.debug('[SSE Recover] Stream completed, messageId:', data.messageId);
+
+        if (streamingBufferRef.current || streamingReasoningBufferRef.current) {
+          const assistantMessage: Message = {
+            role: 'assistant',
+            content: streamingBufferRef.current,
+            reasoning: streamingReasoningBufferRef.current || undefined,
+          };
+          setMessages((prev) => [...prev, assistantMessage]);
+        }
+
+        setCurrentStreamingMessage('');
+        setCurrentStreamingReasoning('');
+        streamingBufferRef.current = '';
+        streamingReasoningBufferRef.current = '';
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      },
+
+      onError: (errorData: SEEErrorData) => {
+        console.error('[SSE Recover] Error:', errorData.message);
+        setError(errorData.message);
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      },
+    };
+
+    try {
+      await recoverSSEConnection(
+        conversationId,
+        messageId,
+        lastEventId,
+        handlers,
+        abortController.signal
+      );
+    } catch (err) {
+      if (abortController.signal.aborted) {
+        console.debug('[SSE Recover] Connection aborted by user');
+        return;
+      }
+
+      const errorMessage = err instanceof Error ? err.message : '断线恢复失败';
+      setError(errorMessage);
+      setIsLoading(false);
+      abortControllerRef.current = null;
+    }
+  }, [closeConnection]);
+
   // 组件卸载时关闭连接
   useEffect(() => {
     return () => {
@@ -281,5 +378,6 @@ export function useSSEChat(): UseSSEChatReturn {
     resetChatState,
     setConversationId,
     loadConversation,
+    recoverStream,
   };
 }

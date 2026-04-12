@@ -1,9 +1,9 @@
 import { getAuthStatus, getToken, redirectToLogin } from './auth';
-import { SSEChunkData, SEDoneData, SEEErrorData, SEPingData } from '../types';
+import { SSEMessageIdData, SSEChunkData, SEDoneData, SEEErrorData, SEPingData } from '../types';
 
-export type { SSEChunkData, SEDoneData, SEEErrorData, SEPingData };
+export type { SSEMessageIdData, SSEChunkData, SEDoneData, SEEErrorData, SEPingData };
 
-export type SSEEventData = SSEChunkData | SEDoneData | SEEErrorData | SEPingData;
+export type SSEEventData = SSEMessageIdData | SSEChunkData | SEDoneData | SEEErrorData | SEPingData;
 
 // SSE 回调类型
 export type SSEHandlers = {
@@ -20,11 +20,11 @@ export type SSEHandlers = {
  * 支持标准 SSE 格式：
  * event: chunk
  * data: {"content": "hello"}
- * 
+ *
  * 也兼容简化格式：
  * data: {"content": "hello"}
  */
-function parseSSEBlock(block: string): SSEEventData | null {
+export function parseSSEBlock(block: string): SSEEventData | null {
   const trimmed = block.trim();
   if (!trimmed) return null;
 
@@ -69,9 +69,75 @@ function parseSSEBlock(block: string): SSEEventData | null {
 }
 
 /**
+ * 读取和处理 SSE 流式数据（通用函数）
+ */
+export async function readSSEStream(
+  response: Response,
+  handlers: SSEHandlers,
+  signal: AbortSignal
+): Promise<void> {
+  // 检查 response body
+  if (!response.body) {
+    handlers.onError?.({ type: 'error', message: '服务器未返回流式数据' });
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let terminalEventReceived = false;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        // 处理剩余的 buffer
+        if (buffer.trim()) {
+          const eventData = parseSSEBlock(buffer);
+          if (eventData) {
+            terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
+          }
+        }
+        console.debug('[SSE] Stream ended');
+        if (!signal.aborted && !terminalEventReceived) {
+          handlers.onError?.({ type: 'error', message: '连接意外中断，请重试' });
+        }
+        break;
+      }
+
+      // 解码数据块
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
+
+      // 按 SSE 标准分隔符 \n\n 分割事件块
+      const blocks = buffer.split('\n\n');
+      // 保留最后一个可能不完整的块
+      buffer = blocks.pop() || '';
+
+      for (const block of blocks) {
+        const eventData = parseSSEBlock(block);
+        if (!eventData) {
+          continue;
+        }
+        terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
+      }
+    }
+  } catch (error) {
+    if (signal.aborted) {
+      console.debug('[SSE] Stream aborted');
+      return;
+    }
+
+    const errorMessage = error instanceof Error ? error.message : '读取流式数据失败';
+    handlers.onError?.({ type: 'error', message: errorMessage });
+  }
+}
+
+/**
  * 创建 SSE 流式连接（使用 fetch + ReadableStream）
  * 支持 POST 请求体，适合发送消息内容
- * 
+ *
  * @param message 用户消息
  * @param conversationId 会话ID（可选）
  * @param handlers 事件处理器
@@ -161,75 +227,22 @@ export async function createSSEConnection(
     return;
   }
 
-  // 检查 response body
-  if (!response.body) {
-    handlers.onError?.({ type: 'error', message: '服务器未返回流式数据' });
-    return;
-  }
-
   // 读取流式数据
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let terminalEventReceived = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        // 处理剩余的 buffer
-        if (buffer.trim()) {
-          const eventData = parseSSEBlock(buffer);
-          if (eventData) {
-            terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
-          }
-        }
-        console.debug('[SSE] Stream ended');
-        if (!signal.aborted && !terminalEventReceived) {
-          handlers.onError?.({ type: 'error', message: '连接意外中断，请重试' });
-        }
-        break;
-      }
-
-      // 解码数据块
-      const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-
-      // 按 SSE 标准分隔符 \n\n 分割事件块
-      const blocks = buffer.split('\n\n');
-      // 保留最后一个可能不完整的块
-      buffer = blocks.pop() || '';
-
-      for (const block of blocks) {
-        const eventData = parseSSEBlock(block);
-        if (!eventData) {
-          continue;
-        }
-        terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
-      }
-    }
-  } catch (error) {
-    if (signal.aborted) {
-      console.debug('[SSE] Stream aborted');
-      return;
-    }
-
-    const errorMessage = error instanceof Error ? error.message : '读取流式数据失败';
-    handlers.onError?.({ type: 'error', message: errorMessage });
-  }
+  await readSSEStream(response, handlers, signal);
 }
 
 /**
  * 分发 SSE 事件到对应的处理器
  */
-function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): boolean {
-  // ⭐ 提取 messageId（从 chunk 或 done 事件）
-  if ('messageId' in eventData && eventData.messageId) {
-    handlers.onMessageId?.(eventData.messageId);
-  }
-
-  if (eventData.type === 'chunk') {
+export function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): boolean {
+  if (eventData.type === 'message_id') {
+    // ⭐ 首个事件：立即保存 messageId（用于后续中断操作）
+    const messageIdData = eventData as SSEMessageIdData;
+    if (messageIdData.messageId) {
+      handlers.onMessageId?.(messageIdData.messageId);
+    }
+    return false;
+  } else if (eventData.type === 'chunk') {
     // 处理思考过程（reasoning 或 info 字段）
     const reasoningContent = (eventData as SSEChunkData).reasoning || (eventData as SSEChunkData).info;
     if (reasoningContent) {
@@ -246,10 +259,10 @@ function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): boole
     return false;
   } else if (eventData.type === 'done') {
     const doneData = eventData as SEDoneData;
-    // 提取 conversationId（done 事件中可能包含）
-    if (doneData.conversationId) {
-      handlers.onConversationId?.(doneData.conversationId);
-    }
+    
+    // 提取 conversationId（done 事件中必填）
+    handlers.onConversationId?.(doneData.conversationId);
+    
     handlers.onDone?.(doneData);
     return true;
   } else if (eventData.type === 'error') {

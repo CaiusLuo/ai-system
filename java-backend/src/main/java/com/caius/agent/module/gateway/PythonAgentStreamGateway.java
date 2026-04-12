@@ -54,6 +54,7 @@ public class PythonAgentStreamGateway {
 
         // chunk 计数器（用于生成 index）
         AtomicInteger chunkIndex = new AtomicInteger(0);
+        AtomicInteger totalEvents = new AtomicInteger(0);
 
         return webClient.post()
                 .uri(streamEndpoint)
@@ -62,9 +63,16 @@ public class PythonAgentStreamGateway {
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)
-                .doOnNext(line -> log.debug("[流式网关] 收到行: {}", line))
+                .doOnSubscribe(subscription -> log.info("[流式网关] 已订阅 Python 服务流"))
+                .doOnNext(line -> {
+                    totalEvents.incrementAndGet();
+                    log.debug("[流式网关] 收到行 (#{}) {}", totalEvents.get(), line);
+                })
                 .map(line -> normalizeSseData(line, chunkIndex))
-                .doOnNext(event -> log.debug("[流式网关] 标准化事件: event={}, data={}", event.getEvent(), event.getData()));
+                .doOnNext(event -> log.debug("[流式网关] 标准化事件: event={}, data={}", event.getEvent(), event.getData()))
+                .doOnComplete(() -> log.info("[流式网关] Python 服务流正常结束, 总事件数={}", totalEvents.get()))
+                .doOnCancel(() -> log.warn("[流式网关] Python 服务流被取消, 总事件数={}", totalEvents.get()))
+                .doOnError(error -> log.error("[流式网关] Python 服务流异常, 总事件数={}, 错误={}", totalEvents.get(), error.getMessage(), error));
     }
 
     /**

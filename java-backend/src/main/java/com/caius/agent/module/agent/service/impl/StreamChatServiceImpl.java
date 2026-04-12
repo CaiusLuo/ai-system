@@ -73,12 +73,15 @@ public class StreamChatServiceImpl implements StreamChatService {
 
     // 并发控制
     private final ConcurrentHashMap<Long, AtomicInteger> userActiveStreams = new ConcurrentHashMap<>();
+    
+    // 每个流的 chunk 计数器（用于日志）
+    private final ConcurrentHashMap<String, AtomicInteger> streamChunkCounts = new ConcurrentHashMap<>();
 
     @Value("${streaming.per-user-limit:5}")
     private int perUserLimit;
 
     // 任务超时时间（分钟）
-    @Value("${streaming.task-timeout:10}")
+    @Value("${streaming.task-timeout:30}")
     private int taskTimeoutMinutes;
 
     @Override
@@ -89,11 +92,14 @@ public class StreamChatServiceImpl implements StreamChatService {
             throw new IllegalStateException("用户并发流数超限: " + activeCount.get() + "/" + perUserLimit);
         }
 
-        SseEmitter emitter = new SseEmitter(120000L);
+        SseEmitter emitter = new SseEmitter(600000L);  // 600 秒（10 分钟）空闲超时
         SafeEmitter safeEmitter = new SafeEmitter(emitter);
 
         // 生成 messageId 用于 abort 控制
         String messageId = UUID.randomUUID().toString();
+        
+        // 初始化 chunk 计数器
+        streamChunkCounts.put(messageId, new AtomicInteger(0));
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -102,33 +108,45 @@ public class StreamChatServiceImpl implements StreamChatService {
                 activeCount.decrementAndGet();
                 // 清理 abort 标记，防止内存泄漏
                 abortManager.cleanup(messageId);
+                // 清理 chunk 计数器
+                streamChunkCounts.remove(messageId);
                 log.debug("[流式] 清理资源, messageId={}", messageId);
             }
         });
 
         emitter.onCompletion(() -> {
-            log.debug("[流式] SSE 完成, messageId={}", messageId);
+            AtomicInteger count = streamChunkCounts.get(messageId);
+            log.info("[流式] SSE 连接完成, messageId={}, 总 chunks={}", messageId, count != null ? count.get() : 0);
             safeEmitter.markCompleted();
         });
         emitter.onTimeout(() -> {
-            log.warn("[流式] SSE 超时, userId={}, messageId={}", userId, messageId);
+            AtomicInteger count = streamChunkCounts.get(messageId);
+            log.warn("[流式] SSE 连接超时, userId={}, messageId={}, 已发送 chunks={}", userId, messageId, count != null ? count.get() : 0);
             safeEmitter.markCompleted();
             abortManager.triggerAbort(messageId);
         });
         emitter.onError((ex) -> {
+            AtomicInteger count = streamChunkCounts.get(messageId);
             if (isClientDisconnect(ex)) {
-                log.debug("[流式] 客户端已断开, messageId={}", messageId);
+                log.info("[流式] 客户端断开连接, messageId={}, 已发送 chunks={}", messageId, count != null ? count.get() : 0);
             } else {
-                log.error("[流式] SSE 错误, messageId={}", messageId, ex);
+                log.error("[流式] SSE 连接错误, messageId={}, 已发送 chunks={}", messageId, count != null ? count.get() : 0, ex);
             }
             safeEmitter.markCompleted();
             abortManager.triggerAbort(messageId);
         });
 
         // 返回 messageId 给前端（通过响应头）
-        // 注意：SSE 连接建立后才能设置 header，这里通过 CompletableFuture 异步处理
-        // 前端需要从首次响应中获取 messageId（在 done 事件中也会返回）
-        
+        // ⭐ 重要：messageId 在 SSE 连接建立时立即返回，供前端 abort 使用
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("message_id")
+                    .data("{\"messageId\":\"" + messageId + "\"}"));
+            log.debug("[流式] 已发送 messageId, messageId={}", messageId);
+        } catch (IOException e) {
+            log.warn("[流式] 发送 messageId 失败", e);
+        }
+
         return emitter;
     }
 
@@ -138,9 +156,9 @@ public class StreamChatServiceImpl implements StreamChatService {
     private void handleStream(SafeEmitter emitter, Long userId, StreamChatRequest request, String messageId) {
         // 标记是否是新创建的会话（用于 abort 时判断是否删除会话）
         boolean[] isNewConversation = {false};
-        
+
         Long conversationId = getOrCreateConversation(userId, request);
-        
+
         // 检查是否是新创建的会话
         if (request.getConversationId() == null) {
             isNewConversation[0] = true;
@@ -148,7 +166,11 @@ public class StreamChatServiceImpl implements StreamChatService {
 
         // 创建 abort 标记并关联 conversationId
         abortManager.createAbortFlag(messageId, userId, conversationId);
-        log.info("[流式] 开始处理, userId={}, messageId={}, conversationId={}, isNewConversation={}", 
+        
+        // 获取共享的 chunk 计数器
+        AtomicInteger chunkCount = streamChunkCounts.get(messageId);
+        
+        log.info("[流式] 开始处理, userId={}, messageId={}, conversationId={}, isNewConversation={}",
                 userId, messageId, conversationId, isNewConversation[0]);
 
         Map<String, Object> requestBody = buildRequestBody(userId, request, conversationId);
@@ -156,7 +178,6 @@ public class StreamChatServiceImpl implements StreamChatService {
         // 内存缓冲：累积所有 chunk 数据（只在内存中，不写 IO）
         List<String> chunkDataBuffer = Collections.synchronizedList(new ArrayList<>());
         StringBuilder fullContent = new StringBuilder();
-        AtomicInteger chunkCount = new AtomicInteger(0);
         AtomicBoolean completed = new AtomicBoolean(false);
         AtomicBoolean aborted = new AtomicBoolean(false);
 
@@ -170,14 +191,34 @@ public class StreamChatServiceImpl implements StreamChatService {
         CountDownLatch latch = new CountDownLatch(1);
         reactor.core.Disposable subscription = null;
 
+        // 设置心跳机制：每 30 秒发送一次 ping，防止空闲超时
+        ScheduledExecutorService heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
+        AtomicBoolean lastEventWasPing = new AtomicBoolean(false);
+        ScheduledFuture<?> heartbeatFuture = heartbeatScheduler.scheduleAtFixedRate(() -> {
+            if (!completed.get()) {
+                try {
+                    log.debug("[流式] 发送心跳, messageId={}", messageId);
+                    SseEvent pingEvent = new SseEvent("ping", null, "{\"type\":\"ping\"}");
+                    emitter.sendEvent(pingEvent);
+                    lastEventWasPing.set(true);
+                } catch (IOException e) {
+                    log.debug("[流式] 心跳发送失败，连接可能已断开, messageId={}", messageId);
+                    // 心跳失败可能意味着连接已断开，但不主动关闭
+                }
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+
         // 设置任务超时
         ScheduledExecutorService timeoutScheduler = Executors.newSingleThreadScheduledExecutor();
         ScheduledFuture<?> timeoutFuture = timeoutScheduler.schedule(() -> {
             if (!completed.get()) {
-                log.warn("[流式] 任务超时, messageId={}", messageId);
+                log.warn("[流式] 任务超时触发, messageId={}, 已接收 chunks={}, completed={}",
+                        messageId, chunkCount.get(), completed.get());
                 abortManager.triggerAbort(messageId);
                 emitter.trySendError("任务超时");
                 emitter.complete();
+            } else {
+                log.debug("[流式] 任务超时检查时已完成，跳过, messageId={}", messageId);
             }
         }, taskTimeoutMinutes, TimeUnit.MINUTES);
 
@@ -293,9 +334,14 @@ public class StreamChatServiceImpl implements StreamChatService {
                     })
                     .doFinally(signal -> {
                         completed.set(true);
-                        // 取消超时任务
+                        log.info("[流式] 流最终结束, messageId={}, signal={}, 总 chunks={}, aborted={}",
+                                messageId, signal, chunkCount.get(), aborted.get());
+                        
+                        // 取消心跳和超时任务
+                        heartbeatFuture.cancel(false);
+                        heartbeatScheduler.shutdownNow();
                         timeoutFuture.cancel(false);
-                        timeoutScheduler.shutdown();
+                        timeoutScheduler.shutdownNow();
 
                         // ⭐ 如果是 abort，清理中间数据
                         // 注意：由于用户消息延迟写入，abort 时通常只需清理 Redis
@@ -323,9 +369,12 @@ public class StreamChatServiceImpl implements StreamChatService {
             if (subscription != null && !subscription.isDisposed()) {
                 subscription.dispose();
             }
-            // 确保超时调度器关闭
+            // 确保超时和心跳调度器关闭
             if (!timeoutScheduler.isShutdown()) {
                 timeoutScheduler.shutdownNow();
+            }
+            if (!heartbeatScheduler.isShutdown()) {
+                heartbeatScheduler.shutdownNow();
             }
         }
     }

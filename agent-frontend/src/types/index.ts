@@ -73,6 +73,21 @@ export interface StreamChatParams {
   sessionId?: string;          // 可选：会话标识
 }
 
+export interface ChatRequest {
+  message: string;             // 必填：用户消息
+  conversationId?: number;     // 可选：已有会话 ID
+}
+
+export interface ChatResponse {
+  reply: string;               // AI 回复内容
+  conversationId: number;      // 会话 ID
+}
+
+export interface SSEMessageIdData {
+  type: 'message_id';
+  messageId: string;          // ⭐ 消息唯一标识（用于中断操作，首个事件）
+}
+
 export interface SSEChunkData {
   type: 'chunk';
   content: string;
@@ -80,15 +95,13 @@ export interface SSEChunkData {
   reasoning?: string;         // 思考过程内容
   info?: string;              // 额外信息（别名）
   conversationId?: number;    // 首次响应可能包含 conversationId
-  messageId?: string;         // 后端生成的消息 ID（备用）
 }
 
 export interface SEDoneData {
   type: 'done';
-  total_tokens: number;       // 总 token 数
-  conversationId?: number;    // 会话 ID
-  messageId: string;          // 后端生成的消息 ID（推荐，在 done 事件中返回）
-  info?: string;              // 额外信息
+  info: string;               // 完成总结/标题（必填）
+  conversationId: number;     // 会话 ID（必填）
+  messageId: string;          // 后端生成的消息 ID（用于中断操作）
 }
 
 export interface SEEErrorData {
@@ -100,7 +113,7 @@ export interface SEPingData {
   type: 'ping';
 }
 
-export type SSEEventData = SSEChunkData | SEDoneData | SEEErrorData | SEPingData;
+export type SSEEventData = SSEMessageIdData | SSEChunkData | SEDoneData | SEEErrorData | SEPingData;
 
 // ==================== 管理员相关 ====================
 
