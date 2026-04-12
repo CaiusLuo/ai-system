@@ -112,7 +112,11 @@ public class StreamChatServiceImpl implements StreamChatService {
             abortManager.triggerAbort(messageId);
         });
         emitter.onError((ex) -> {
-            log.error("[流式] SSE 错误, messageId={}", messageId, ex);
+            if (isClientDisconnect(ex)) {
+                log.debug("[流式] 客户端已断开, messageId={}", messageId);
+            } else {
+                log.error("[流式] SSE 错误, messageId={}", messageId, ex);
+            }
             safeEmitter.markCompleted();
             abortManager.triggerAbort(messageId);
         });
@@ -259,17 +263,27 @@ public class StreamChatServiceImpl implements StreamChatService {
                             }
 
                         } catch (IOException e) {
-                            log.error("[流式] 发送失败", e);
+                            if (isClientDisconnect(e)) {
+                                log.debug("[流式] 客户端断开连接, messageId={}", messageId);
+                            } else {
+                                log.error("[流式] 发送失败, messageId={}", messageId, e);
+                            }
                             if (completed.compareAndSet(false, true)) {
-                                emitter.trySendError("发送失败");
+                                if (!isClientDisconnect(e)) {
+                                    emitter.trySendError("发送失败");
+                                }
                                 emitter.complete();
                             }
                         }
                     })
                     .doOnError(err -> {
                         if (completed.compareAndSet(false, true)) {
-                            log.error("[流式] 异常: {}", err.getMessage());
-                            emitter.trySendError("服务异常");
+                            if (isClientDisconnect(err)) {
+                                log.debug("[流式] 客户端断开导致流结束, messageId={}", messageId);
+                            } else {
+                                log.error("[流式] 异常, messageId={}", messageId, err);
+                                emitter.trySendError("服务异常");
+                            }
                             emitter.complete();
                         }
                     })
@@ -622,6 +636,34 @@ public class StreamChatServiceImpl implements StreamChatService {
         } catch (Exception e) {
             log.error("[Error] 清理中间数据失败", e);
         }
+    }
+
+    private boolean isClientDisconnect(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String className = current.getClass().getName();
+            String message = current.getMessage();
+            if (className.contains("AsyncRequestNotUsableException")
+                    || className.contains("ClientAbortException")
+                    || containsDisconnectMessage(message)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean containsDisconnectMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("broken pipe")
+                || normalized.contains("connection reset")
+                || normalized.contains("connection aborted")
+                || normalized.contains("async request")
+                || normalized.contains("forcibly closed")
+                || normalized.contains("response has already been committed");
     }
 
     // ==================== SafeEmitter ====================

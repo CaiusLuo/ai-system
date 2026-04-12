@@ -160,6 +160,7 @@ export async function createSSEConnection(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let terminalEventReceived = false;
 
   try {
     while (true) {
@@ -170,10 +171,13 @@ export async function createSSEConnection(
         if (buffer.trim()) {
           const eventData = parseSSEBlock(buffer);
           if (eventData) {
-            dispatchSSEEvent(eventData, handlers);
+            terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
           }
         }
         console.debug('[SSE] Stream ended');
+        if (!signal.aborted && !terminalEventReceived) {
+          handlers.onError?.({ type: 'error', message: '连接意外中断，请重试' });
+        }
         break;
       }
 
@@ -191,7 +195,7 @@ export async function createSSEConnection(
         if (!eventData) {
           continue;
         }
-        dispatchSSEEvent(eventData, handlers);
+        terminalEventReceived = dispatchSSEEvent(eventData, handlers) || terminalEventReceived;
       }
     }
   } catch (error) {
@@ -208,7 +212,7 @@ export async function createSSEConnection(
 /**
  * 分发 SSE 事件到对应的处理器
  */
-function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): void {
+function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): boolean {
   // ⭐ 提取 messageId（从 chunk 或 done 事件）
   if ('messageId' in eventData && eventData.messageId) {
     handlers.onMessageId?.(eventData.messageId);
@@ -228,6 +232,7 @@ function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): void 
     if ((eventData as SSEChunkData).conversationId) {
       handlers.onConversationId?.((eventData as SSEChunkData).conversationId!);
     }
+    return false;
   } else if (eventData.type === 'done') {
     const doneData = eventData as SEDoneData;
     // 提取 conversationId（done 事件中可能包含）
@@ -235,9 +240,13 @@ function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): void 
       handlers.onConversationId?.(doneData.conversationId);
     }
     handlers.onDone?.(doneData);
+    return true;
   } else if (eventData.type === 'error') {
     handlers.onError?.(eventData as SEEErrorData);
+    return true;
   } else if (eventData.type === 'ping') {
     console.debug('[SSE] ping received');
+    return false;
   }
+  return false;
 }
