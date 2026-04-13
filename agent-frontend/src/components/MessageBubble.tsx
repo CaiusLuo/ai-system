@@ -1,5 +1,5 @@
 import { memo, useState, useEffect } from 'react';
-import { Message } from '../hooks/useSSEChat';
+import type { Message } from '../types';
 import MarkdownRenderer from './MarkdownRenderer';
 
 interface MessageBubbleProps {

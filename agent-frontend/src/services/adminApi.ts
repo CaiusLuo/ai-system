@@ -1,48 +1,71 @@
-// Admin API 服务
-
-import { api, ApiResponse } from './api';
+import { z } from 'zod';
 import {
-  AdminUserDTO,
-  UserListParams,
-  UserListResponse,
+  adminUserDtoSchema,
+  createUserParamsSchema,
+  updateAdminUserParamsSchema,
+  userListParamsSchema,
+  userListResponseSchema,
+  type AdminUserDTO,
+  type CreateUserParams,
+  type UpdateAdminUserParams,
+  type UserListParams,
+  type UserListResponse,
+} from '../schemas';
+import { api, type ApiResponse } from './api';
+
+export type {
+  AdminUserDTO as User,
   CreateUserParams,
-  UpdateAdminUserParams,
-} from '../types';
+  UpdateAdminUserParams as UpdateUserParams,
+  UserListParams,
+};
 
-export type { AdminUserDTO as User, UserListParams, CreateUserParams, UpdateAdminUserParams as UpdateUserParams };
+const API_BASE = '/api/admin/users';
 
-// API 基础路径
-const API_BASE = '/api/admin';
-
-// 获取用户列表
-export async function getUserList(params: UserListParams): Promise<ApiResponse<UserListResponse>> {
+export async function getUserList(
+  params: UserListParams
+): Promise<ApiResponse<UserListResponse>> {
+  const validatedParams = userListParamsSchema.parse(params);
   const query = new URLSearchParams({
-    page: String(params.page),
-    pageSize: String(params.pageSize),
-    ...(params.keyword ? { keyword: params.keyword } : {}),
-    ...(params.role ? { role: params.role } : {}),
-    ...(params.status ? { status: params.status } : {}),
+    page: String(validatedParams.page),
+    pageSize: String(validatedParams.pageSize),
+    ...(validatedParams.keyword ? { keyword: validatedParams.keyword } : {}),
+    ...(validatedParams.role ? { role: validatedParams.role } : {}),
+    ...(validatedParams.status ? { status: validatedParams.status } : {}),
   }).toString();
 
-  return api.get(`${API_BASE}/users?${query}`);
+  return api.get(`${API_BASE}?${query}`, userListResponseSchema);
 }
 
-// 创建用户
-export async function createUser(data: CreateUserParams): Promise<ApiResponse<AdminUserDTO>> {
-  return api.post(`${API_BASE}/users`, data);
+export async function createUser(
+  data: CreateUserParams
+): Promise<ApiResponse<AdminUserDTO>> {
+  return api.post(
+    API_BASE,
+    data,
+    adminUserDtoSchema,
+    createUserParamsSchema
+  );
 }
 
-// 更新用户
-export async function updateUser(id: number, data: UpdateAdminUserParams): Promise<ApiResponse<AdminUserDTO>> {
-  return api.put(`${API_BASE}/users/${id}`, data);
+export async function updateUser(
+  id: number,
+  data: UpdateAdminUserParams
+): Promise<ApiResponse<AdminUserDTO>> {
+  return api.put(
+    `${API_BASE}/${id}`,
+    data,
+    adminUserDtoSchema,
+    updateAdminUserParamsSchema
+  );
 }
 
-// 删除用户
 export async function deleteUser(id: number): Promise<ApiResponse<null>> {
-  return api.delete(`${API_BASE}/users/${id}`);
+  return api.delete(`${API_BASE}/${id}`, z.null());
 }
 
-// 切换用户状态 (启用/禁用)
-export async function toggleUserStatus(id: number): Promise<ApiResponse<AdminUserDTO>> {
-  return api.patch(`${API_BASE}/users/${id}/toggle-status`);
+export async function toggleUserStatus(
+  id: number
+): Promise<ApiResponse<AdminUserDTO>> {
+  return api.patch(`${API_BASE}/${id}/toggle-status`, undefined, adminUserDtoSchema);
 }

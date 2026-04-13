@@ -1,14 +1,5 @@
 import { useState, useRef, type DragEvent } from 'react';
-import type { ConversationDTO } from '../services/conversation';
-
-interface LocalConvItem {
-  id: string;
-  title: string;
-  backendId: number | null;
-  updatedAt: number;
-  lastMessageContent?: string | null;
-  lastMessageTime?: string | null;
-}
+import type { ConversationDTO, LocalConversationSummary } from '../types';
 
 interface SidebarProps {
   conversations?: ConversationDTO[];
@@ -16,7 +7,7 @@ interface SidebarProps {
   onSelectConversation?: (id: number | string) => void;
   onDeleteConversation?: (id: number | string) => void;
 
-  localConversations?: LocalConvItem[];
+  localConversations?: LocalConversationSummary[];
   currentLocalConvId?: string | null;
   onSelectLocalConversation?: (id: string) => void;
   onDeleteLocalConversation?: (id: string) => void;

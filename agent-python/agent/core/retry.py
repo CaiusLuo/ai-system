@@ -24,7 +24,7 @@ DEFAULT_RETRYABLE_EXCEPTIONS = (
 class RetryExhaustedError(Exception):
     """重试耗尽异常"""
 
-    def __init__(self, message: str, last_exception: Exception = None):
+    def __init__(self, message: str, last_exception: Exception | None = None):
         self.message = message
         self.last_exception = last_exception
         super().__init__(message)

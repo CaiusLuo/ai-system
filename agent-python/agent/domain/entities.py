@@ -1,6 +1,6 @@
 
 """领域实体"""
-from typing import List, TypedDict
+from typing import TypedDict
 
 
 class Message(TypedDict):
@@ -19,7 +19,7 @@ class AgentState(TypedDict):
     conversation_id: int
 
     # 中间数据
-    history_messages: List[Message]
+    history_messages: list[Message]
     system_prompt: str
 
     # 输出

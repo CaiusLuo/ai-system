@@ -8,6 +8,12 @@ import Switch from '../components/Switch';
 import Modal from '../components/Modal';
 import Pagination from '../components/Pagination';
 import {
+  createAdminUserFormSchema,
+  updateAdminUserFormSchema,
+  type AdminFeedbackMessage,
+  type AdminUserFormState,
+} from '../schemas';
+import {
   User,
   getUserList,
   createUser,
@@ -19,15 +25,9 @@ import {
   type UpdateUserParams,
 } from '../services/adminApi';
 
-interface UserFormState {
-  username: string;
-  email: string;
-  password: string;
-  role: 'ADMIN' | 'USER';
-  status: 'ACTIVE' | 'DISABLED';
-}
+type UserFormErrors = Partial<Record<keyof AdminUserFormState, string>>;
 
-const initialFormState: UserFormState = {
+const initialFormState: AdminUserFormState = {
   username: '',
   email: '',
   password: '',
@@ -52,8 +52,8 @@ const AdminUserManagement: React.FC = () => {
   // 弹窗状态
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [formState, setFormState] = useState<UserFormState>(initialFormState);
-  const [formErrors, setFormErrors] = useState<Partial<UserFormState>>({});
+  const [formState, setFormState] = useState<AdminUserFormState>(initialFormState);
+  const [formErrors, setFormErrors] = useState<UserFormErrors>({});
   const [submitLoading, setSubmitLoading] = useState(false);
   
   // 删除确认弹窗
@@ -62,7 +62,7 @@ const AdminUserManagement: React.FC = () => {
   const [deleteLoading, setDeleteLoading] = useState(false);
   
   // 消息提示
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<AdminFeedbackMessage | null>(null);
   
   // 加载用户列表
   const loadUsers = async () => {
@@ -78,11 +78,10 @@ const AdminUserManagement: React.FC = () => {
 
       const response = await getUserList(params);
       if (response.code === 200) {
-        const list = response.data.list || response.data || [];
+        const list = response.data.list;
         setUsers(list);
         // 优先使用 total，其次使用 list 长度
-        const totalCount = response.data.total ?? list.length;
-        setTotal(totalCount);
+        setTotal(response.data.total);
       } else {
         setMessage({ type: 'error', text: response.message || '加载失败' });
       }
@@ -142,7 +141,26 @@ const AdminUserManagement: React.FC = () => {
   
   // 验证表单
   const validateForm = (): boolean => {
-    const errors: Partial<UserFormState> = {};
+    const validationResult = (
+      editingUser ? updateAdminUserFormSchema : createAdminUserFormSchema
+    ).safeParse(formState);
+
+    if (validationResult.success) {
+      setFormErrors({});
+      return true;
+    }
+
+    const errors: UserFormErrors = {};
+    validationResult.error.issues.forEach((issue) => {
+      const field = issue.path[0];
+      if (typeof field === 'string' && !errors[field as keyof AdminUserFormState]) {
+        errors[field as keyof AdminUserFormState] = issue.message;
+      }
+    });
+
+    setFormErrors(errors);
+    return false;
+    /*
     
     if (!formState.username.trim()) {
       errors.username = '用户名不能为空';
@@ -162,6 +180,7 @@ const AdminUserManagement: React.FC = () => {
     
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
+    */
   };
   
   // 提交表单

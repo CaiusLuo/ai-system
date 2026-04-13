@@ -10,9 +10,10 @@
 import asyncio
 import logging
 import time
-from typing import Dict, Union
 
 logger = logging.getLogger(__name__)
+
+type AbortKey = int | str
 
 
 class AbortController:
@@ -35,10 +36,10 @@ class AbortController:
             ttl: abort flag 存活时间（秒），默认 1 小时
         """
         # Dict[key, (asyncio.Event, created_at_timestamp)]
-        self._flags: Dict[Union[int, str], tuple[asyncio.Event, float]] = {}
+        self._flags: dict[AbortKey, tuple[asyncio.Event, float]] = {}
         self._ttl = ttl
 
-    def abort(self, key: Union[int, str]) -> None:
+    def abort(self, key: AbortKey) -> None:
         """
         标记中断
 
@@ -50,7 +51,7 @@ class AbortController:
         self._flags[key][0].set()
         logger.info(f"已标记中断 | key={key}")
 
-    def is_aborted(self, key: Union[int, str]) -> bool:
+    def is_aborted(self, key: AbortKey) -> bool:
         """
         检查是否已中断，同时清理过期条目
 
@@ -74,7 +75,7 @@ class AbortController:
 
         return event.is_set()
 
-    def clear(self, key: Union[int, str]) -> None:
+    def clear(self, key: AbortKey) -> None:
         """
         清除中断标志
 

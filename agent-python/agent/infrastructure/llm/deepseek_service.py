@@ -9,7 +9,6 @@
 """
 import logging
 from collections.abc import AsyncGenerator
-from typing import Any, List, Optional
 
 from langchain_core.messages import (
     AIMessage,
@@ -21,7 +20,7 @@ from langchain_core.messages import (
 from langchain_openai import ChatOpenAI
 
 from ...domain.entities import Message
-from ...domain.protocols import LLMGateway
+from ...domain.protocols import LLMGateway, StreamEvent
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ class DeepSeekService(LLMGateway):
 
     async def generate(
         self,
-        messages: List[Message],
+        messages: list[Message],
         temperature: float = 0.7,
     ) -> str:
         """调用 LLM 生成回复（非流式）"""
@@ -75,9 +74,9 @@ class DeepSeekService(LLMGateway):
 
     async def stream_generate(
         self,
-        messages: List[Message],
+        messages: list[Message],
         temperature: float = 0.7,
-    ) -> AsyncGenerator[dict[str, Any], None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         """
         流式调用 LLM 生成回复
 
@@ -97,7 +96,7 @@ class DeepSeekService(LLMGateway):
             async for chunk in self._llm.astream(langchain_messages):
                 # chunk 是 AIMessageChunk 类型
                 content = ""
-                reasoning = None
+                reasoning: str | None = None
 
                 # 提取正常回复内容
                 # 注意：LangChain 新版中 chunk.content 可能是 list[dict]（多模态/工具调用），
@@ -136,7 +135,7 @@ class DeepSeekService(LLMGateway):
             raise
 
     @staticmethod
-    def _extract_reasoning(chunk: AIMessageChunk) -> Optional[str]:
+    def _extract_reasoning(chunk: AIMessageChunk) -> str | None:
         """
         从 LangChain chunk 中提取 reasoning 内容
 
@@ -167,7 +166,7 @@ class DeepSeekService(LLMGateway):
         return None
 
     @staticmethod
-    def _to_langchain_messages(messages: List[Message]) -> List[BaseMessage]:
+    def _to_langchain_messages(messages: list[Message]) -> list[BaseMessage]:
         """转换为 LangChain 消息格式"""
         result = []
         for msg in messages:

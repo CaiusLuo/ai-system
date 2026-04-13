@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...application.agent.graph import JobAgentGraph
 from ...core.abort import AbortController
-from ...core.exceptions import LLMServiceError
+from ...core.exceptions import LLMServiceError, ServiceUnavailableError
 from ...core.sse import (
     create_chunk_event,
     create_done_event,
@@ -31,6 +31,10 @@ router = APIRouter(prefix="/chat", tags=["聊天"])
 def get_agent_graph() -> JobAgentGraph:
     """依赖注入：获取 Agent 图实例"""
     from main import app_state
+    if app_state.agent_graph is None:
+        raise ServiceUnavailableError(
+            message="LLM 服务未配置，无法处理聊天请求",
+        )
     return app_state.agent_graph
 
 
@@ -155,7 +159,7 @@ async def _stream_generator(
             request_id=request_id,
         ):
             # 检查是否需要发送 ping 心跳（每 15 秒）
-            current_time = asyncio.get_event_loop().time()
+            current_time = asyncio.get_running_loop().time()
             if current_time - last_ping_time > 15:
                 yield create_ping_event()
                 last_ping_time = current_time

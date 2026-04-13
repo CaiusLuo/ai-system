@@ -1,6 +1,4 @@
 """配置管理测试"""
-import pytest
-import os
 from agent.core.config import Settings
 
 

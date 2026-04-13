@@ -1,6 +1,4 @@
 """Abort 控制器测试"""
-import pytest
-import asyncio
 import time
 from agent.core.abort import AbortController
 

@@ -28,7 +28,7 @@ DeepSeek API (支持 think/reasoning)
 | 外部通信 | `httpx.AsyncClient` |
 | 配置管理 | `pydantic-settings` |
 | 依赖管理 | `uv` (pyproject.toml) |
-| Python 版本 | >=3.10 |
+| Python 版本 | 3.12.2 |
 
 ## 快速开始
 
@@ -38,11 +38,11 @@ DeepSeek API (支持 think/reasoning)
 # 安装 uv（Python 包管理器）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 设置 Python 版本
-echo "3.10" > .python-version
+# 安装并使用 Python 3.12.2
+uv python install 3.12.2
 
 # 安装依赖
-uv sync
+uv sync --python 3.12.2
 ```
 
 ### 2. 配置环境变量
@@ -321,13 +321,13 @@ curl -X POST http://localhost:5001/api/v1/chat/stream \
 ### Docker 部署（推荐）
 
 ```dockerfile
-FROM python:3.10-slim
+FROM python:3.12.2-slim
 
 WORKDIR /app
 COPY . .
 
 RUN pip install uv
-RUN uv sync --frozen
+RUN uv sync --frozen --python 3.12.2
 
 EXPOSE 5001
 

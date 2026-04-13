@@ -1,64 +1,71 @@
 import { useCallback } from 'react';
-import { CHAT_CONVERSATIONS_KEY, CHAT_CURRENT_CONV_KEY, clearPersistedChatState } from '../services/chatStorage';
+import {
+  localConversationSummarySchema,
+  storedConversationSchema,
+  storedMessageSchema,
+  type LocalConversationSummary,
+  type StoredConversation,
+  type StoredConversationMap,
+  type StoredMessage,
+} from '../schemas';
+import {
+  CHAT_CONVERSATIONS_KEY,
+  CHAT_CURRENT_CONV_KEY,
+  clearPersistedChatState,
+} from '../services/chatStorage';
 
-interface StoredMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  reasoning?: string;
-  timestamp: number;
-}
-
-interface StoredConversation {
-  id: number | null;  // null 表示新对话（尚未保存到后端）
-  backendId?: number;  // 后端会话 ID（别名）
-  title: string;
-  messages: StoredMessage[];
-  lastMessageContent: string | null;  // 最新消息内容（预览）
-  lastMessageTime: string | null;     // 最新消息时间（ISO 8601）
-  createdAt: number;
-  updatedAt: number;
-}
-
-// 最大存储对话数
 const MAX_CONVERSATIONS = 50;
-// 每个对话最大消息数
 const MAX_MESSAGES = 200;
 
-/**
- * 获取所有本地存储的对话
- */
-export function getStoredConversations(): Record<string, StoredConversation> {
+function parseStoredConversationMap(value: unknown): StoredConversationMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.entries(value as Record<string, unknown>).reduce<StoredConversationMap>(
+    (result, [key, conversation]) => {
+      const parsedConversation = storedConversationSchema.safeParse(conversation);
+      if (parsedConversation.success) {
+        result[key] = parsedConversation.data;
+      } else {
+        console.warn(
+          `[LocalStorage] Skipped invalid conversation "${key}"`,
+          parsedConversation.error.flatten()
+        );
+      }
+
+      return result;
+    },
+    {}
+  );
+}
+
+export function getStoredConversations(): StoredConversationMap {
   try {
     const data = localStorage.getItem(CHAT_CONVERSATIONS_KEY);
-    return data ? JSON.parse(data) : {};
+    if (!data) {
+      return {};
+    }
+
+    return parseStoredConversationMap(JSON.parse(data));
   } catch {
     return {};
   }
 }
 
-/**
- * 保存所有对话到本地存储
- */
-function saveStoredConversations(convs: Record<string, StoredConversation>): void {
+function saveStoredConversations(conversations: StoredConversationMap): void {
   try {
-    localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(convs));
-  } catch (e) {
-    console.warn('[LocalStorage] Failed to save conversations:', e);
+    localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(conversations));
+  } catch (error) {
+    console.warn('[LocalStorage] Failed to save conversations:', error);
   }
 }
 
-/**
- * 生成本地对话 ID
- */
 function generateLocalId(): string {
   return `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/**
- * 本地存储 Hook - 管理对话和消息的本地缓存
- */
 export function useLocalChatStorage() {
-  // 获取当前对话 ID
   const getCurrentConvId = useCallback((): string | null => {
     try {
       return localStorage.getItem(CHAT_CURRENT_CONV_KEY);
@@ -67,7 +74,6 @@ export function useLocalChatStorage() {
     }
   }, []);
 
-  // 设置当前对话 ID
   const setCurrentConvId = useCallback((id: string | null) => {
     try {
       if (id === null) {
@@ -75,140 +81,162 @@ export function useLocalChatStorage() {
       } else {
         localStorage.setItem(CHAT_CURRENT_CONV_KEY, id);
       }
-    } catch (e) {
-      console.warn('[LocalStorage] Failed to set current conv id:', e);
+    } catch (error) {
+      console.warn('[LocalStorage] Failed to set current conv id:', error);
     }
   }, []);
 
-  // 获取当前对话
   const getCurrentConversation = useCallback((): StoredConversation | null => {
     const convId = getCurrentConvId();
-    if (!convId) return null;
+    if (!convId) {
+      return null;
+    }
 
-    const convs = getStoredConversations();
-    return convs[convId] || null;
+    const conversations = getStoredConversations();
+    return conversations[convId] || null;
   }, [getCurrentConvId]);
 
-  // 获取对话列表（元信息，不含消息）
-  const getConversationList = useCallback((): Array<{
-    id: string;
-    title: string;
-    backendId: number | null;
-    updatedAt: number;
-    lastMessageContent: string | null;
-    lastMessageTime: string | null;
-  }> => {
-    const convs = getStoredConversations();
-    // 不排序，保持对象中的顺序（即用户拖拽后的顺序）
-    return Object.entries(convs)
-      .map(([key, conv]) => ({
-        id: key,
-        title: conv.title,
-        backendId: conv.id,
-        updatedAt: conv.updatedAt,
-        lastMessageContent: conv.lastMessageContent,
-        lastMessageTime: conv.lastMessageTime,
-      }))
+  const getConversationList = useCallback((): LocalConversationSummary[] => {
+    const conversations = getStoredConversations();
+
+    return Object.entries(conversations)
+      .map(([key, conversation]) =>
+        localConversationSummarySchema.parse({
+          id: key,
+          title: conversation.title,
+          backendId: conversation.backendId ?? conversation.id,
+          updatedAt: conversation.updatedAt,
+          lastMessageContent: conversation.lastMessageContent,
+          lastMessageTime: conversation.lastMessageTime,
+        })
+      )
       .slice(0, MAX_CONVERSATIONS);
   }, []);
 
-  // 创建新对话
-  const createConversation = useCallback((title?: string): string => {
-    const convId = generateLocalId();
-    const convs = getStoredConversations();
+  const createConversation = useCallback(
+    (title?: string): string => {
+      const convId = generateLocalId();
+      const conversations = getStoredConversations();
 
-    convs[convId] = {
-      id: null,  // 尚未同步到后端
-      title: title || '新对话',
-      messages: [],
-      lastMessageContent: null,
-      lastMessageTime: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+      conversations[convId] = storedConversationSchema.parse({
+        id: null,
+        title: title || '新对话',
+        messages: [],
+        lastMessageContent: null,
+        lastMessageTime: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
 
-    saveStoredConversations(convs);
-    setCurrentConvId(convId);
-    return convId;
-  }, [setCurrentConvId]);
+      saveStoredConversations(conversations);
+      setCurrentConvId(convId);
+      return convId;
+    },
+    [setCurrentConvId]
+  );
 
-  // 添加消息到当前对话
-  const addMessage = useCallback((message: Omit<StoredMessage, 'timestamp'>) => {
-    const convId = getCurrentConvId();
-    if (!convId) return;
+  const addMessage = useCallback(
+    (message: Omit<StoredMessage, 'timestamp'>) => {
+      const convId = getCurrentConvId();
+      if (!convId) {
+        return;
+      }
 
-    const convs = getStoredConversations();
-    const conv = convs[convId];
-    if (!conv) return;
+      const conversations = getStoredConversations();
+      const conversation = conversations[convId];
+      if (!conversation) {
+        return;
+      }
 
-    // 限制消息数量
-    if (conv.messages.length >= MAX_MESSAGES) {
-      conv.messages = conv.messages.slice(-MAX_MESSAGES);
-    }
+      if (conversation.messages.length >= MAX_MESSAGES) {
+        conversation.messages = conversation.messages.slice(-(MAX_MESSAGES - 1));
+      }
 
-    const timestamp = Date.now();
-    conv.messages.push({ ...message, timestamp });
-    conv.updatedAt = timestamp;
+      const timestamp = Date.now();
+      const nextMessage = storedMessageSchema.parse({
+        ...message,
+        timestamp,
+      });
 
-    // 更新最新消息内容
-    conv.lastMessageContent = message.content;
-    conv.lastMessageTime = new Date(timestamp).toISOString();
+      conversation.messages.push(nextMessage);
+      conversation.updatedAt = timestamp;
+      conversation.lastMessageContent = nextMessage.content;
+      conversation.lastMessageTime = new Date(timestamp).toISOString();
 
-    // 如果是第一条用户消息，使用它作为对话标题
-    if (conv.messages.length === 1 && message.role === 'user') {
-      conv.title = message.content.slice(0, 30) + (message.content.length > 30 ? '...' : '');
-    }
+      if (conversation.messages.length === 1 && nextMessage.role === 'user') {
+        conversation.title =
+          nextMessage.content.slice(0, 30) +
+          (nextMessage.content.length > 30 ? '...' : '');
+      }
 
-    convs[convId] = conv;
-    saveStoredConversations(convs);
-  }, [getCurrentConvId]);
+      conversations[convId] = conversation;
+      saveStoredConversations(conversations);
+    },
+    [getCurrentConvId]
+  );
 
-  // 更新最后一条消息（用于流式输出）
-  const updateLastMessage = useCallback((updater: (msg: StoredMessage) => StoredMessage) => {
-    const convId = getCurrentConvId();
-    if (!convId) return;
+  const updateLastMessage = useCallback(
+    (updater: (message: StoredMessage) => StoredMessage) => {
+      const convId = getCurrentConvId();
+      if (!convId) {
+        return;
+      }
 
-    const convs = getStoredConversations();
-    const conv = convs[convId];
-    if (!conv || conv.messages.length === 0) return;
+      const conversations = getStoredConversations();
+      const conversation = conversations[convId];
+      if (!conversation || conversation.messages.length === 0) {
+        return;
+      }
 
-    const lastIdx = conv.messages.length - 1;
-    conv.messages[lastIdx] = updater(conv.messages[lastIdx]);
-    conv.updatedAt = Date.now();
+      const lastIndex = conversation.messages.length - 1;
+      const updatedMessage = storedMessageSchema.parse(
+        updater(conversation.messages[lastIndex])
+      );
 
-    convs[convId] = conv;
-    saveStoredConversations(convs);
-  }, [getCurrentConvId]);
+      conversation.messages[lastIndex] = updatedMessage;
+      conversation.updatedAt = Date.now();
+      conversation.lastMessageContent = updatedMessage.content;
+      conversation.lastMessageTime = new Date(conversation.updatedAt).toISOString();
 
-  // 删除对话
-  const deleteConversation = useCallback((convId: string) => {
-    const convs = getStoredConversations();
-    delete convs[convId];
-    saveStoredConversations(convs);
+      conversations[convId] = conversation;
+      saveStoredConversations(conversations);
+    },
+    [getCurrentConvId]
+  );
 
-    // 如果删除的是当前对话，清除当前 ID
-    if (getCurrentConvId() === convId) {
-      setCurrentConvId(null);
-    }
-  }, [getCurrentConvId, setCurrentConvId]);
+  const deleteConversation = useCallback(
+    (convId: string) => {
+      const conversations = getStoredConversations();
+      delete conversations[convId];
+      saveStoredConversations(conversations);
 
-  // 切换对话
-  const switchConversation = useCallback((convId: string) => {
-    setCurrentConvId(convId);
-  }, [setCurrentConvId]);
+      if (getCurrentConvId() === convId) {
+        setCurrentConvId(null);
+      }
+    },
+    [getCurrentConvId, setCurrentConvId]
+  );
 
-  // 同步后端对话 ID（当后端返回真实 ID 后更新本地记录）
+  const switchConversation = useCallback(
+    (convId: string) => {
+      setCurrentConvId(convId);
+    },
+    [setCurrentConvId]
+  );
+
   const syncBackendId = useCallback((localConvId: string, backendId: number) => {
-    const convs = getStoredConversations();
-    const conv = convs[localConvId];
-    if (!conv) return;
+    const conversations = getStoredConversations();
+    const conversation = conversations[localConvId];
+    if (!conversation) {
+      return;
+    }
 
-    conv.id = backendId;
-    convs[localConvId] = conv;
-    saveStoredConversations(convs);
+    conversation.id = backendId;
+    conversation.backendId = backendId;
+    conversations[localConvId] = conversation;
+    saveStoredConversations(conversations);
   }, []);
 
-  // 清空所有本地数据
   const clearAll = useCallback(() => {
     clearPersistedChatState();
   }, []);

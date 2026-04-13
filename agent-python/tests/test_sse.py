@@ -1,5 +1,4 @@
 """SSE 格式化工具测试"""
-import pytest
 import json
 from agent.core.sse import (
     format_sse,

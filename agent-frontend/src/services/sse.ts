@@ -1,52 +1,54 @@
+import {
+  sseEventDataSchema,
+  streamChatParamsSchema,
+  type SSEChunkData,
+  type SEDoneData,
+  type SEEErrorData,
+  type SEPingData,
+  type SSEEventData,
+  type SSEMessageIdData,
+} from '../schemas';
 import { getAuthStatus, getToken, redirectToLogin } from './auth';
-import { SSEMessageIdData, SSEChunkData, SEDoneData, SEEErrorData, SEPingData } from '../types';
 
-export type { SSEMessageIdData, SSEChunkData, SEDoneData, SEEErrorData, SEPingData };
-
-export type SSEEventData = SSEMessageIdData | SSEChunkData | SEDoneData | SEEErrorData | SEPingData;
-
-// SSE 回调类型
-export type SSEHandlers = {
-  onChunk?: (content: string, index: number) => void;
-  onReasoning?: (reasoning: string, index: number) => void; // 思考过程
-  onDone?: (data: SEDoneData) => void;
-  onError?: (error: SEEErrorData) => void;
-  onConversationId?: (conversationId: number) => void; // 新增：提取 conversationId
-  onMessageId?: (messageId: string) => void; // 新增：提取 messageId
+export type {
+  SSEChunkData,
+  SEDoneData,
+  SEEErrorData,
+  SEPingData,
+  SSEMessageIdData,
 };
 
-/**
- * 解析完整的多行 SSE 事件块
- * 支持标准 SSE 格式：
- * event: chunk
- * data: {"content": "hello"}
- *
- * 也兼容简化格式：
- * data: {"content": "hello"}
- */
+export type SSEHandlers = {
+  onChunk?: (content: string, index: number) => void;
+  onReasoning?: (reasoning: string, index: number) => void;
+  onDone?: (data: SEDoneData) => void;
+  onError?: (error: SEEErrorData) => void;
+  onConversationId?: (conversationId: number) => void;
+  onMessageId?: (messageId: string) => void;
+};
+
 export function parseSSEBlock(block: string): SSEEventData | null {
   const trimmed = block.trim();
-  if (!trimmed) return null;
+  if (!trimmed) {
+    return null;
+  }
 
-  let eventType = 'chunk'; // 默认事件类型
+  let eventType = 'chunk';
   let dataStr = '';
 
-  // 按行分割
   const lines = trimmed.split('\n');
   for (const line of lines) {
-    const lineTrimmed = line.trim();
-    
-    if (lineTrimmed.startsWith('event: ')) {
-      eventType = lineTrimmed.slice(7).trim();
-    } else if (lineTrimmed.startsWith('data: ')) {
-      dataStr = lineTrimmed.slice(6);
-    } else if (lineTrimmed.startsWith('data:')) {
-      // 处理 "data:" 后面没有空格的情况
-      dataStr = lineTrimmed.slice(5);
+    const currentLine = line.trim();
+
+    if (currentLine.startsWith('event: ')) {
+      eventType = currentLine.slice(7).trim();
+    } else if (currentLine.startsWith('data: ')) {
+      dataStr = currentLine.slice(6);
+    } else if (currentLine.startsWith('data:')) {
+      dataStr = currentLine.slice(5);
     }
   }
 
-  // 如果没有找到 data，尝试直接解析整个块
   if (!dataStr && trimmed.startsWith('data: ')) {
     dataStr = trimmed.slice(6);
   }
@@ -56,34 +58,36 @@ export function parseSSEBlock(block: string): SSEEventData | null {
   }
 
   try {
-    const parsed = JSON.parse(dataStr);
-    // 如果 JSON 中已有 type 字段，使用它；否则使用从 event: 行提取的
-    return {
-      type: parsed.type || eventType,
-      ...parsed,
-    };
+    const parsed = JSON.parse(dataStr) as unknown;
+    const candidate =
+      parsed && typeof parsed === 'object'
+        ? {
+            ...(parsed as Record<string, unknown>),
+            type:
+              'type' in (parsed as Record<string, unknown>)
+                ? (parsed as Record<string, unknown>).type
+                : eventType,
+          }
+        : { type: eventType };
+
+    const result = sseEventDataSchema.safeParse(candidate);
+    if (!result.success) {
+      console.warn('[SSE] Failed to validate SSE block:', trimmed, result.error.flatten());
+      return null;
+    }
+
+    return result.data;
   } catch (error) {
     console.warn('[SSE] Failed to parse SSE block:', trimmed, error);
     return null;
   }
 }
 
-/**
- * 读取和处理 SSE 流式数据（通用函数）
- *
- * 状态机：
- *   streaming → done     → 正常结束（收到 done 事件）
- *   streaming → error    → 服务端报错（收到 error 事件）
- *   streaming → closed   → 服务器关闭连接（reader.done），正常结束
- *   streaming → aborted  → 用户主动中断
- *   streaming → timeout  → 超时错误
- */
 export async function readSSEStream(
   response: Response,
   handlers: SSEHandlers,
   signal: AbortSignal,
   options?: {
-    /** 心跳超时时间（ms），超过此时间未收到任何数据则报错，默认 120s */
     heartbeatTimeout?: number;
   }
 ): Promise<void> {
@@ -97,9 +101,8 @@ export async function readSSEStream(
   let buffer = '';
   const heartbeatTimeout = options?.heartbeatTimeout ?? 120_000;
   let lastDataTime = Date.now();
-  let settled = false; // 是否已经以 done/error 结算
+  let settled = false;
 
-  // 心跳超时定时器
   const heartbeatTimer = setInterval(() => {
     if (!settled && Date.now() - lastDataTime > heartbeatTimeout) {
       clearInterval(heartbeatTimer);
@@ -114,7 +117,6 @@ export async function readSSEStream(
 
   try {
     while (true) {
-      // 带超时的 read：超时直接抛出明确的 timeout 错误
       const { done, value } = await withTimeout(
         reader.read(),
         heartbeatTimeout,
@@ -122,8 +124,6 @@ export async function readSSEStream(
       );
 
       if (done) {
-        // 服务器主动关闭连接，正常结束
-        // 处理 buffer 中最后一个可能不完整的块
         if (buffer.trim()) {
           const eventData = parseSSEBlock(buffer);
           if (eventData) {
@@ -131,8 +131,6 @@ export async function readSSEStream(
           }
         }
 
-        // 如果尚未结算（没收到 done/error 事件），调用 onDone 完成结算
-        // 服务器关闭连接本身就是正常结束，不应报错
         if (!settled) {
           settled = true;
           handlers.onDone?.({ type: 'done', conversationId: 0, messageId: '', info: '' });
@@ -142,20 +140,29 @@ export async function readSSEStream(
         break;
       }
 
-      // 收到数据，刷新心跳
       lastDataTime = Date.now();
 
       const chunk = decoder.decode(value, { stream: true });
       buffer += chunk;
 
-      // 按 \n\n 分割事件块
       const blocks = buffer.split('\n\n');
       buffer = blocks.pop() || '';
 
       for (const block of blocks) {
         const eventData = parseSSEBlock(block);
-        if (!eventData) continue;
+        if (!eventData) {
+          continue;
+        }
+
         settled = dispatchSSEEvent(eventData, handlers) || settled;
+        if (settled) {
+          console.debug('[SSE] Stream settled by event, stop reading loop');
+          break;
+        }
+      }
+
+      if (settled) {
+        break;
       }
     }
   } catch (error) {
@@ -166,7 +173,6 @@ export async function readSSEStream(
       return;
     }
 
-    // 超时错误已有友好提示，直接透传
     if (error instanceof Error && error.message === '读取流式数据超时') {
       handlers.onError?.({
         type: 'error',
@@ -175,47 +181,48 @@ export async function readSSEStream(
       return;
     }
 
-    // 其他读取错误
     let errorMessage = '读取流式数据失败';
     if (error instanceof TypeError) {
       errorMessage = '网络连接异常，请检查网络后重试';
     } else if (error instanceof Error) {
-      const msg = error.message.toLowerCase();
-      if (msg.includes('network') || msg.includes('connection') || msg.includes('reset')) {
+      const message = error.message.toLowerCase();
+      if (
+        message.includes('network') ||
+        message.includes('connection') ||
+        message.includes('reset')
+      ) {
         errorMessage = '网络连接中断，请重试';
       } else {
         errorMessage = error.message;
       }
     }
+
     handlers.onError?.({ type: 'error', message: errorMessage });
   } finally {
     clearInterval(heartbeatTimer);
   }
 }
 
-/**
- * 给 Promise 加超时，超时后抛出明确错误
- */
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
     promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); reject(err); }
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
     );
   });
 }
 
-/**
- * 创建 SSE 流式连接（使用 fetch + ReadableStream）
- * 支持 POST 请求体，适合发送消息内容
- *
- * @param message 用户消息
- * @param conversationId 会话ID（可选）
- * @param handlers 事件处理器
- * @param signal AbortController 的 signal，用于中断请求
- * @returns Promise，在流式传输完成时 resolve
- */
 export async function createSSEConnection(
   message: string,
   conversationId: number | undefined,
@@ -235,10 +242,10 @@ export async function createSSEConnection(
     return;
   }
 
-  const requestBody: any = { message };
-  if (conversationId !== undefined) {
-    requestBody.conversationId = conversationId;
-  }
+  const requestBody = streamChatParamsSchema.parse({
+    message,
+    ...(conversationId !== undefined ? { conversationId } : {}),
+  });
 
   let response: Response;
   try {
@@ -247,7 +254,7 @@ export async function createSSEConnection(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(requestBody),
       signal,
@@ -258,42 +265,45 @@ export async function createSSEConnection(
       return;
     }
 
-    // 细化网络错误诊断
     let errorMessage = '连接失败';
     if (error instanceof TypeError && error.message.includes('fetch')) {
-      // 常见于 CORS、网络断开、DNS 解析失败
       errorMessage = '网络连接失败，请检查网络后重试';
     } else if (error instanceof DOMException && error.name === 'AbortError') {
       console.debug('[SSE] Request aborted by signal');
       return;
     } else if (error instanceof Error) {
-      const msg = error.message.toLowerCase();
-      if (msg.includes('network') || msg.includes('connection') || msg.includes('reset')) {
+      const networkMessage = error.message.toLowerCase();
+      if (
+        networkMessage.includes('network') ||
+        networkMessage.includes('connection') ||
+        networkMessage.includes('reset')
+      ) {
         errorMessage = '网络连接中断，请重试';
       } else {
         errorMessage = `连接失败: ${error.message}`;
       }
     }
+
     handlers.onError?.({ type: 'error', message: errorMessage });
     return;
   }
 
-  // 检查响应状态
   if (!response.ok) {
-    let errorMessage = response.status === 401
-      ? '认证失败，请重新登录'
-      : response.status === 403
-        ? '无权访问当前会话'
-      : response.status === 429
-        ? '请求过于频繁，请稍后重试'
-        : `服务器错误 (${response.status})`;
+    let errorMessage =
+      response.status === 401
+        ? '认证失败，请重新登录'
+        : response.status === 403
+          ? '无权访问当前会话'
+          : response.status === 429
+            ? '请求过于频繁，请稍后重试'
+            : `服务器错误 (${response.status})`;
 
     if (response.status === 401) {
       try {
         const errorData = await response.json();
         errorMessage = errorData?.message || errorMessage;
       } catch {
-        // ignore JSON parse failure and keep fallback message
+        // keep fallback message
       }
 
       handlers.onError?.({ type: 'error', message: errorMessage });
@@ -306,63 +316,56 @@ export async function createSSEConnection(
         const errorData = await response.json();
         errorMessage = errorData?.message || errorMessage;
       } catch {
-        // ignore JSON parse failure and keep fallback message
+        // keep fallback message
       }
     }
-    
+
     handlers.onError?.({ type: 'error', message: errorMessage });
     return;
   }
 
-  // 读取流式数据
   await readSSEStream(response, handlers, signal, {
-    heartbeatTimeout: 120_000, // 120 秒无数据则超时
+    heartbeatTimeout: 120_000,
   });
 }
 
-/**
- * 分发 SSE 事件到对应的处理器
- */
-export function dispatchSSEEvent(eventData: SSEEventData, handlers: SSEHandlers): boolean {
-  if (eventData.type === 'message_id') {
-    // ⭐ 首个事件：立即保存 messageId（用于后续中断操作）
-    const messageIdData = eventData as SSEMessageIdData;
-    if (messageIdData.messageId) {
-      handlers.onMessageId?.(messageIdData.messageId);
-    }
-    return false;
-  } else if (eventData.type === 'chunk') {
-    // 处理思考过程（reasoning 或 info 字段）
-    const reasoningContent = (eventData as SSEChunkData).reasoning || (eventData as SSEChunkData).info;
-    if (reasoningContent) {
-      handlers.onReasoning?.(reasoningContent, (eventData as SSEChunkData).index);
-    }
+export function dispatchSSEEvent(
+  eventData: SSEEventData,
+  handlers: SSEHandlers
+): boolean {
+  switch (eventData.type) {
+    case 'message_id':
+      if (eventData.messageId) {
+        handlers.onMessageId?.(eventData.messageId);
+      }
+      return false;
+    case 'chunk': {
+      const reasoningContent = eventData.reasoning || eventData.info;
+      if (reasoningContent) {
+        handlers.onReasoning?.(reasoningContent, eventData.index);
+      }
 
-    // 处理正式回复内容 — 过滤掉 undefined/null/空字符串，防止 "" + undefined → "undefined"
-    const content = (eventData as SSEChunkData).content;
-    if (content) {
-      handlers.onChunk?.(content, (eventData as SSEChunkData).index);
-    }
+      if (eventData.content) {
+        handlers.onChunk?.(eventData.content, eventData.index);
+      }
 
-    // 提取 conversationId（首次响应时）
-    if ((eventData as SSEChunkData).conversationId) {
-      handlers.onConversationId?.((eventData as SSEChunkData).conversationId!);
+      if (typeof eventData.conversationId === 'number') {
+        handlers.onConversationId?.(eventData.conversationId);
+      }
+
+      return false;
     }
-    return false;
-  } else if (eventData.type === 'done') {
-    const doneData = eventData as SEDoneData;
-    
-    // 提取 conversationId（done 事件中必填）
-    handlers.onConversationId?.(doneData.conversationId);
-    
-    handlers.onDone?.(doneData);
-    return true;
-  } else if (eventData.type === 'error') {
-    handlers.onError?.(eventData as SEEErrorData);
-    return true;
-  } else if (eventData.type === 'ping') {
-    console.debug('[SSE] ping received');
-    return false;
+    case 'done':
+      handlers.onConversationId?.(eventData.conversationId);
+      handlers.onDone?.(eventData);
+      return true;
+    case 'error':
+      handlers.onError?.(eventData);
+      return true;
+    case 'ping':
+      console.debug('[SSE] ping received');
+      return false;
+    default:
+      return false;
   }
-  return false;
 }

@@ -3,7 +3,7 @@ name = "agent-python"
 version = "0.2.0"
 description = "求职Agent - 基于 FastAPI + LangGraph + LangChain + DeepSeek"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.104.1,<1.0",
     "uvicorn>=0.24.0,<1.0",
@@ -15,10 +15,9 @@ dependencies = [
     "pydantic>=2.5.0,<3.0",
     "pydantic-settings>=2.1.0,<3.0",
     "python-dotenv>=1.0.0,<2.0",
-    "eval-type-backport>=0.3.1",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=7.4.0,<8.0",
     "pytest-asyncio>=0.21.0,<1.0",
@@ -26,7 +25,8 @@ dev = [
     "ruff>=0.1.0,<1.0",
 ]
 
-[project.scripts]
+[tool.uv]
+package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -34,9 +34,9 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501", "UP006", "UP007", "UP035", "UP045", "E402"]
+ignore = ["E501", "E402"]
 

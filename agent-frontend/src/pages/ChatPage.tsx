@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect as useEffectHook, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSSEChat, Message } from '../hooks/useSSEChat';
+import { useSSEChat } from '../hooks/useSSEChat';
 import { useLocalChatStorage, getStoredConversations } from '../hooks/useLocalChatStorage';
 import Sidebar from '../components/Sidebar';
 import MessageBubble from '../components/MessageBubble';
@@ -8,11 +8,17 @@ import MessageSkeleton from '../components/MessageSkeleton';
 import ChatInput from '../components/ChatInput';
 import AdminPanel from './AdminPanel';
 import { logout, getUserInfo, AUTH_PAGE_PATH } from '../services/auth';
+import type {
+  LocalConversationSummary,
+  Message,
+  StoredConversationMap,
+  StoredMessage,
+} from '../types';
 
 // 本地消息转换为 Message 格式
-function storedToMessage(msg: { role: string; content: string; reasoning?: string; timestamp?: number }): Message {
+function storedToMessage(msg: StoredMessage): Message {
   return {
-    role: msg.role as 'user' | 'assistant',
+    role: msg.role,
     content: msg.content,
     reasoning: msg.reasoning,
   };
@@ -48,14 +54,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [localConversations, setLocalConversations] = useState<Array<{
-    id: string;
-    title: string;
-    backendId: number | null;
-    updatedAt: number;
-    lastMessageContent: string | null;
-    lastMessageTime: string | null;
-  }>>([]);
+  const [localConversations, setLocalConversations] = useState<LocalConversationSummary[]>([]);
   const [currentLocalConvId, setCurrentLocalConvId] = useState<string | null>(null);
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [isSwitchingConversation, setIsSwitchingConversation] = useState(false);
@@ -275,7 +274,7 @@ export default function ChatPage() {
   // 拖拽排序对话
   const handleReorderConversations = useCallback((orderedIds: string[]) => {
     const convs = getStoredConversations();
-    const orderedConvs: Record<string, any> = {};
+    const orderedConvs: StoredConversationMap = {};
     orderedIds.forEach(id => {
       if (convs[id]) {
         orderedConvs[id] = convs[id];
@@ -327,6 +326,11 @@ export default function ChatPage() {
     if (streamingContent || reasoningContent) {
       const lastMsg = baseMessages[baseMessages.length - 1];
       const hasStreamingAssistant = lastMsg && lastMsg.role === 'assistant' && isLoading;
+      const isSameAsLastAssistant =
+        !!lastMsg &&
+        lastMsg.role === 'assistant' &&
+        lastMsg.content === streamingContent &&
+        (reasoningContent ? (lastMsg.reasoning || '') === reasoningContent : true);
 
       if (hasStreamingAssistant) {
         baseMessages[baseMessages.length - 1] = {
@@ -334,7 +338,7 @@ export default function ChatPage() {
           content: streamingContent,
           reasoning: reasoningContent || lastMsg.reasoning,
         };
-      } else {
+      } else if (!isSameAsLastAssistant) {
         baseMessages.push({
           role: 'assistant',
           content: streamingContent,

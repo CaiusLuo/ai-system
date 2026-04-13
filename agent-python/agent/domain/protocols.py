@@ -1,9 +1,11 @@
 
 """领域协议 - 定义服务契约，实现依赖倒置"""
 from collections.abc import AsyncGenerator
-from typing import List, Protocol
+from typing import Any, Protocol
 
 from .entities import Message
+
+type StreamEvent = dict[str, Any]
 
 
 class ConversationRepository(Protocol):
@@ -13,7 +15,7 @@ class ConversationRepository(Protocol):
         self,
         conversation_id: int,
         token: str,
-    ) -> List[Message]: ...
+    ) -> list[Message]: ...
 
 
 class LLMGateway(Protocol):
@@ -21,12 +23,12 @@ class LLMGateway(Protocol):
 
     async def generate(
         self,
-        messages: List[Message],
+        messages: list[Message],
         temperature: float = 0.7,
     ) -> str: ...
 
     async def stream_generate(
         self,
-        messages: List[Message],
+        messages: list[Message],
         temperature: float = 0.7,
-    ) -> AsyncGenerator[str, None]: ...
+    ) -> AsyncGenerator[StreamEvent, None]: ...

@@ -6,7 +6,7 @@
 - 友好的错误消息国际化（预留）
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 class AgentException(Exception):  # noqa: N818
@@ -16,7 +16,7 @@ class AgentException(Exception):  # noqa: N818
         self,
         message: str,
         status_code: int = 500,
-        detail: Optional[Any] = None,
+        detail: Any | None = None,
         error_code: str = "INTERNAL_ERROR",
     ):
         self.message = message
@@ -25,7 +25,7 @@ class AgentException(Exception):  # noqa: N818
         self.error_code = error_code
         super().__init__(message)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any | None]:
         """转换为字典格式（用于 API 响应）"""
         return {
             "error_code": self.error_code,
@@ -37,7 +37,7 @@ class AgentException(Exception):  # noqa: N818
 class LLMServiceError(AgentException):
     """LLM 服务调用异常"""
 
-    def __init__(self, message: str, detail: Optional[Any] = None):
+    def __init__(self, message: str, detail: Any | None = None):
         super().__init__(
             message=message,
             status_code=502,
@@ -49,7 +49,7 @@ class LLMServiceError(AgentException):
 class ExternalServiceError(AgentException):
     """外部服务调用异常"""
 
-    def __init__(self, message: str, detail: Optional[Any] = None):
+    def __init__(self, message: str, detail: Any | None = None):
         super().__init__(
             message=message,
             status_code=502,
@@ -61,7 +61,7 @@ class ExternalServiceError(AgentException):
 class ValidationError(AgentException):
     """参数校验异常"""
 
-    def __init__(self, message: str, detail: Optional[Any] = None):
+    def __init__(self, message: str, detail: Any | None = None):
         super().__init__(
             message=message,
             status_code=400,
@@ -73,7 +73,7 @@ class ValidationError(AgentException):
 class RateLimitError(AgentException):
     """并发限制异常"""
 
-    def __init__(self, message: str = "请求过于频繁，请稍后重试", detail: Optional[Any] = None):
+    def __init__(self, message: str = "请求过于频繁，请稍后重试", detail: Any | None = None):
         super().__init__(
             message=message,
             status_code=429,
@@ -85,7 +85,7 @@ class RateLimitError(AgentException):
 class TimeoutError(AgentException):
     """超时异常"""
 
-    def __init__(self, message: str = "请求超时，请稍后重试", detail: Optional[Any] = None):
+    def __init__(self, message: str = "请求超时，请稍后重试", detail: Any | None = None):
         super().__init__(
             message=message,
             status_code=504,
@@ -97,7 +97,7 @@ class TimeoutError(AgentException):
 class ServiceUnavailableError(AgentException):
     """服务不可用异常"""
 
-    def __init__(self, message: str = "服务暂时不可用，请稍后重试", detail: Optional[Any] = None):
+    def __init__(self, message: str = "服务暂时不可用，请稍后重试", detail: Any | None = None):
         super().__init__(
             message=message,
             status_code=503,

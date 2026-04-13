@@ -12,10 +12,14 @@
 """
 import json
 import time
-from typing import Optional
+from typing import Any
 
 
-def format_sse(data: dict, event: str = "message", event_id: Optional[str] = None) -> str:
+def format_sse(
+    data: dict[str, Any],
+    event: str = "message",
+    event_id: str | None = None,
+) -> str:
     """
     将数据格式化为 SSE 协议格式
 
@@ -42,18 +46,18 @@ def format_sse(data: dict, event: str = "message", event_id: Optional[str] = Non
 
 def _build_base_data(
     event_type: str,
-    request_id: Optional[str] = None,
-    user_id: Optional[int] = None,
-    conversation_id: Optional[int] = None,
-    message_id: Optional[str] = None,
-) -> dict:
+    request_id: str | None = None,
+    user_id: int | None = None,
+    conversation_id: int | None = None,
+    message_id: str | None = None,
+) -> dict[str, Any]:
     """
     构建事件的基础数据，统一绑定上下文追踪字段
 
     所有 SSE 事件（ping 除外）都应调用此方法，
     确保 Java 后端能将 chunk 正确归并到 assistant message。
     """
-    data: dict = {"type": event_type}
+    data: dict[str, Any] = {"type": event_type}
     if request_id is not None:
         data["requestId"] = request_id
     if user_id is not None:
@@ -66,10 +70,10 @@ def _build_base_data(
 
 
 def create_start_event(
-    request_id: Optional[str] = None,
-    user_id: Optional[int] = None,
-    conversation_id: Optional[int] = None,
-    message_id: Optional[str] = None,
+    request_id: str | None = None,
+    user_id: int | None = None,
+    conversation_id: int | None = None,
+    message_id: str | None = None,
 ) -> str:
     """
     创建 start 事件（流式开始）
@@ -84,11 +88,11 @@ def create_start_event(
 def create_chunk_event(
     content: str,
     index: int,
-    request_id: Optional[str] = None,
-    user_id: Optional[int] = None,
-    conversation_id: Optional[int] = None,
-    message_id: Optional[str] = None,
-    reasoning: Optional[str] = None,
+    request_id: str | None = None,
+    user_id: int | None = None,
+    conversation_id: int | None = None,
+    message_id: str | None = None,
+    reasoning: str | None = None,
 ) -> str:
     """
     创建 chunk 事件（AI 内容片段）
@@ -106,10 +110,10 @@ def create_chunk_event(
 
 
 def create_done_event(
-    request_id: Optional[str] = None,
-    user_id: Optional[int] = None,
-    conversation_id: Optional[int] = None,
-    message_id: Optional[str] = None,
+    request_id: str | None = None,
+    user_id: int | None = None,
+    conversation_id: int | None = None,
+    message_id: str | None = None,
     info: str = "对话完成",
     content_length: int = 0,
     chunk_count: int = 0,
@@ -129,12 +133,12 @@ def create_done_event(
 
 def create_error_event(
     message: str,
-    request_id: Optional[str] = None,
-    user_id: Optional[int] = None,
-    conversation_id: Optional[int] = None,
-    message_id: Optional[str] = None,
-    index: Optional[int] = None,
-    error_code: Optional[str] = None,
+    request_id: str | None = None,
+    user_id: int | None = None,
+    conversation_id: int | None = None,
+    message_id: str | None = None,
+    index: int | None = None,
+    error_code: str | None = None,
 ) -> str:
     """
     创建 error 事件（错误）

@@ -8,13 +8,12 @@
 """
 import logging
 from collections.abc import AsyncGenerator
-from typing import Any, Optional
 
 from langgraph.graph import END, START, StateGraph
 
 from ...core.abort import AbortController
-from ...domain.entities import AgentState
-from ...domain.protocols import ConversationRepository, LLMGateway
+from ...domain.entities import AgentState, Message
+from ...domain.protocols import ConversationRepository, LLMGateway, StreamEvent
 from .nodes import (
     create_fetch_history_node,
     create_generate_reply_node,
@@ -37,7 +36,7 @@ class JobAgentGraph:
         self,
         repository: ConversationRepository,
         llm_gateway: LLMGateway,
-        abort_controller: AbortController = None,
+        abort_controller: AbortController | None = None,
     ):
         self._repository = repository
         self._llm_gateway = llm_gateway
@@ -114,9 +113,9 @@ class JobAgentGraph:
         user_id: int,
         conversation_id: int,
         system_prompt: str = "",
-        message_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-    ) -> AsyncGenerator[dict[str, Any], None]:
+        message_id: str | None = None,
+        request_id: str | None = None,
+    ) -> AsyncGenerator[StreamEvent, None]:
         """
         执行 Agent 工作流（流式）
 
@@ -154,7 +153,7 @@ class JobAgentGraph:
         )
 
         # 1. 获取历史消息（简化处理，暂不获取）
-        history = []
+        history: list[Message] = []
 
         # 2. 构建消息上下文
         messages = self._build_messages_for_stream(
@@ -178,9 +177,9 @@ class JobAgentGraph:
     @staticmethod
     def _build_messages_for_stream(
         user_message: str,
-        history: list,
+        history: list[Message],
         system_prompt: str = "",
-    ) -> list:
+    ) -> list[Message]:
         """构建流式模式的消息列表"""
         from ...domain.entities import Message
         from ...prompts.system import SYSTEM_PROMPT

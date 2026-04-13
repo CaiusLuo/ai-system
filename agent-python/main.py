@@ -16,7 +16,6 @@ Job Agent API - FastAPI 应用入口
 - 健康检查：GET /api/v1/health
 """
 from contextlib import asynccontextmanager
-from typing import Optional
 import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -39,8 +38,8 @@ class AppState:
     """应用状态容器 - 替代全局变量"""
 
     def __init__(self):
-        self.agent_graph: Optional[JobAgentGraph] = None
-        self.abort_controller: Optional[AbortController] = None
+        self.agent_graph: JobAgentGraph | None = None
+        self.abort_controller: AbortController | None = None
 
 
 app_state = AppState()
@@ -53,6 +52,7 @@ async def lifespan(app: FastAPI):
 
     # 初始化 Abort 控制器
     app_state.abort_controller = AbortController()
+    app.state.abort_controller = app_state.abort_controller
 
     # 初始化基础设施
     java_client = JavaBackendClient(
@@ -60,21 +60,26 @@ async def lifespan(app: FastAPI):
         timeout=settings.java_backend_timeout,
     )
 
-    llm_service = DeepSeekService(
-        api_key=settings.deepseek_api_key,
-        base_url=settings.deepseek_base_url,
-        model=settings.deepseek_model,
-        temperature=settings.llm_temperature,
-        max_tokens=settings.llm_max_tokens,
-        timeout=settings.llm_timeout,
-    )
+    if settings.has_llm_config():
+        llm_service = DeepSeekService(
+            api_key=settings.deepseek_api_key or "",
+            base_url=settings.deepseek_base_url or "",
+            model=settings.deepseek_model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout,
+        )
 
-    # 注入依赖，构建 Agent 图
-    app_state.agent_graph = JobAgentGraph(
-        repository=java_client,
-        llm_gateway=llm_service,
-        abort_controller=app_state.abort_controller,
-    )
+        # 注入依赖，构建 Agent 图
+        app_state.agent_graph = JobAgentGraph(
+            repository=java_client,
+            llm_gateway=llm_service,
+            abort_controller=app_state.abort_controller,
+        )
+    else:
+        app_state.agent_graph = None
+
+    app.state.agent_graph = app_state.agent_graph
 
     yield
 

@@ -1,5 +1,3 @@
-from typing import List
-
 """FastAPI 中间件
 
 企业级中间件：
@@ -12,7 +10,7 @@ import logging
 import time
 from uuid import uuid4
 
-from fastapi import Request, Response
+from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
@@ -64,7 +62,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             raise
 
 
-def setup_cors(app, allow_origins: List[str] = None):
+def setup_cors(app: FastAPI, allow_origins: list[str] | None = None) -> None:
     """
     设置 CORS 中间件
 

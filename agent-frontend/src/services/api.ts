@@ -1,14 +1,24 @@
-// 统一 API 请求封装
-
+import { z } from 'zod';
+import { apiResponseEnvelopeSchema } from '../schemas';
 import { getAuthStatus, getToken, redirectToLogin, removeToken } from './auth';
 
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   code: number;
   message: string;
   data: T;
 }
 
-// HTTP 错误处理策略
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+type RequestConfig<TRequest, TResponse> = {
+  url: string;
+  method: HttpMethod;
+  body?: TRequest;
+  requestSchema?: z.ZodType<TRequest>;
+  responseSchema: z.ZodType<TResponse>;
+  options?: Omit<RequestInit, 'body' | 'method'>;
+};
+
 class ApiError extends Error {
   constructor(
     public code: number,
@@ -20,7 +30,6 @@ class ApiError extends Error {
   }
 }
 
-// 处理认证失败
 function handleUnauthorized(): void {
   const authStatus = getAuthStatus();
   if (authStatus === 'expired') {
@@ -32,11 +41,42 @@ function handleUnauthorized(): void {
   redirectToLogin('unauthorized');
 }
 
-// 统一请求方法
-export async function request<T>(
-  url: string,
-  options?: RequestInit
-): Promise<ApiResponse<T>> {
+function parseWithSchema<T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  context: string,
+  errorCode = 500,
+  httpStatus = 500
+): T {
+  const result = schema.safeParse(value);
+  if (result.success) {
+    return result.data;
+  }
+
+  console.error(`[Schema] ${context} validation failed`, result.error.flatten());
+  throw new ApiError(errorCode, httpStatus, `${context}数据结构校验失败`);
+}
+
+async function parseJsonResponse(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new ApiError(
+      response.status,
+      response.status,
+      '服务端返回了无效的 JSON 数据'
+    );
+  }
+}
+
+export async function request<TRequest = undefined, TResponse = unknown>({
+  url,
+  method,
+  body,
+  requestSchema,
+  responseSchema,
+  options,
+}: RequestConfig<TRequest, TResponse>): Promise<ApiResponse<TResponse>> {
   const authStatus = getAuthStatus();
   if (authStatus === 'expired') {
     redirectToLogin('session-expired');
@@ -48,6 +88,10 @@ export async function request<T>(
     throw new ApiError(401, 401, '登录信息无效，请重新登录');
   }
 
+  const validatedBody = requestSchema
+    ? parseWithSchema(requestSchema, body, `${method} ${url} 请求参数`, 400, 400)
+    : body;
+
   const token = getToken();
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -57,10 +101,11 @@ export async function request<T>(
 
   const response = await fetch(url, {
     ...options,
+    method,
     headers,
+    body: validatedBody === undefined ? undefined : JSON.stringify(validatedBody),
   });
 
-  // 处理 401 未授权
   if (response.status === 401) {
     let errorMessage = '认证失败，请重新登录';
 
@@ -68,7 +113,7 @@ export async function request<T>(
       const errorData = await response.json();
       errorMessage = errorData?.message || errorMessage;
     } catch {
-      // ignore JSON parse failure and keep fallback message
+      // keep fallback message
     }
 
     if (errorMessage.includes('过期')) {
@@ -80,18 +125,15 @@ export async function request<T>(
     throw new ApiError(401, 401, errorMessage);
   }
 
-  // 处理 403 权限不足
   if (response.status === 403) {
     throw new ApiError(403, 403, '权限不足');
   }
 
-  // 处理 404 资源不存在
   if (response.status === 404) {
     const errorText = await response.text();
     throw new ApiError(404, 404, errorText || '资源不存在');
   }
 
-  // 处理其他 HTTP 错误
   if (!response.ok) {
     const errorText = await response.text();
     throw new ApiError(
@@ -101,44 +143,112 @@ export async function request<T>(
     );
   }
 
-  const result: ApiResponse<T> = await response.json();
+  const rawResult = await parseJsonResponse(response);
+  const envelope = parseWithSchema(
+    apiResponseEnvelopeSchema,
+    rawResult,
+    `${method} ${url} 响应包`,
+    500,
+    response.status
+  );
 
-  // 检查业务状态码
-  if (result.code !== 200) {
-    throw new ApiError(result.code, response.status, result.message || '请求失败');
+  if (envelope.code !== 200) {
+    throw new ApiError(
+      envelope.code,
+      response.status,
+      envelope.message || '请求失败'
+    );
   }
 
-  return result;
+  return {
+    ...envelope,
+    data: parseWithSchema(
+      responseSchema,
+      envelope.data,
+      `${method} ${url} 响应数据`,
+      500,
+      response.status
+    ),
+  };
 }
 
-// 便捷方法
 export const api = {
-  get: <T>(url: string, options?: RequestInit) =>
-    request<T>(url, { ...options, method: 'GET' }),
+  get<TResponse>(
+    url: string,
+    responseSchema: z.ZodType<TResponse>,
+    options?: Omit<RequestInit, 'body' | 'method'>
+  ) {
+    return request<undefined, TResponse>({
+      url,
+      method: 'GET',
+      responseSchema,
+      options,
+    });
+  },
 
-  post: <T>(url: string, data?: any, options?: RequestInit) =>
-    request<T>(url, {
-      ...options,
+  post<TRequest, TResponse>(
+    url: string,
+    body: TRequest,
+    responseSchema: z.ZodType<TResponse>,
+    requestSchema?: z.ZodType<TRequest>,
+    options?: Omit<RequestInit, 'body' | 'method'>
+  ) {
+    return request<TRequest, TResponse>({
+      url,
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
-    }),
+      body,
+      requestSchema,
+      responseSchema,
+      options,
+    });
+  },
 
-  put: <T>(url: string, data?: any, options?: RequestInit) =>
-    request<T>(url, {
-      ...options,
+  put<TRequest, TResponse>(
+    url: string,
+    body: TRequest,
+    responseSchema: z.ZodType<TResponse>,
+    requestSchema?: z.ZodType<TRequest>,
+    options?: Omit<RequestInit, 'body' | 'method'>
+  ) {
+    return request<TRequest, TResponse>({
+      url,
       method: 'PUT',
-      body: data ? JSON.stringify(data) : undefined,
-    }),
+      body,
+      requestSchema,
+      responseSchema,
+      options,
+    });
+  },
 
-  patch: <T>(url: string, data?: any, options?: RequestInit) =>
-    request<T>(url, {
-      ...options,
+  patch<TRequest, TResponse>(
+    url: string,
+    body: TRequest,
+    responseSchema: z.ZodType<TResponse>,
+    requestSchema?: z.ZodType<TRequest>,
+    options?: Omit<RequestInit, 'body' | 'method'>
+  ) {
+    return request<TRequest, TResponse>({
+      url,
       method: 'PATCH',
-      body: data ? JSON.stringify(data) : undefined,
-    }),
+      body,
+      requestSchema,
+      responseSchema,
+      options,
+    });
+  },
 
-  delete: <T>(url: string, options?: RequestInit) =>
-    request<T>(url, { ...options, method: 'DELETE' }),
+  delete<TResponse>(
+    url: string,
+    responseSchema: z.ZodType<TResponse>,
+    options?: Omit<RequestInit, 'body' | 'method'>
+  ) {
+    return request<undefined, TResponse>({
+      url,
+      method: 'DELETE',
+      responseSchema,
+      options,
+    });
+  },
 };
 
 export { ApiError };
