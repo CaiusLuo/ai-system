@@ -45,7 +45,6 @@ jobs:
       RELEASE_SHA: ${{ github.sha }}
       JAVA_VERSION: "21"
       NODE_VERSION: "20"
-      PYTHON_VERSION: "3.10"
       JAVA_SERVICE_NAME: ai-system-java
       PYTHON_SERVICE_NAME: ai-system-python
       NGINX_SITE_NAME: ai-system
@@ -98,7 +97,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version-file: agent-python/.python-version
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -179,13 +178,24 @@ jobs:
           script: |
             set -eu
 
+            TMP_ARCHIVE="/tmp/${DEPLOY_ARCHIVE}"
+            KEEP_RELEASES=3
+            PYTHON_BIN=""
+            trap 'rm -f "$TMP_ARCHIVE"' EXIT
+
             if ! sudo -n true >/dev/null 2>&1; then
               echo "The deploy user must have passwordless sudo for systemctl/nginx setup."
               exit 1
             fi
 
-            if ! command -v python3.10 >/dev/null 2>&1; then
-              echo "python3.10 is required on the server."
+            if command -v python3.12 >/dev/null 2>&1; then
+              PYTHON_BIN="python3.12"
+            elif command -v python3 >/dev/null 2>&1 && python3 --version 2>/dev/null | grep -q '^Python 3\.12'; then
+              PYTHON_BIN="python3"
+            fi
+
+            if [ -z "$PYTHON_BIN" ]; then
+              echo "Python 3.12 is required on the server."
               exit 1
             fi
 
@@ -197,11 +207,11 @@ jobs:
             CURRENT_LINK="$APP_DIR/current"
 
             mkdir -p "$APP_DIR/releases" "$SHARED_DIR" "$RELEASE_DIR"
-            tar -xzf "/tmp/${DEPLOY_ARCHIVE}" -C "$RELEASE_DIR"
+            tar -xzf "$TMP_ARCHIVE" -C "$RELEASE_DIR"
 
-            python3.10 -m venv "$RELEASE_DIR/agent-python/.venv"
-            "$RELEASE_DIR/agent-python/.venv/bin/pip" install --upgrade pip
-            "$RELEASE_DIR/agent-python/.venv/bin/pip" install -r "$RELEASE_DIR/agent-python/requirements.txt"
+            "$PYTHON_BIN" -m venv "$RELEASE_DIR/agent-python/.venv"
+            "$RELEASE_DIR/agent-python/.venv/bin/pip" install --upgrade --no-cache-dir pip
+            "$RELEASE_DIR/agent-python/.venv/bin/pip" install --no-cache-dir -r "$RELEASE_DIR/agent-python/requirements.txt"
 
             printf '%s\n' "DB_HOST=${DB_HOST}" "DB_PORT=${DB_PORT}" "DB_NAME=${DB_NAME}" "DB_USERNAME=${DB_USERNAME}" "DB_PASSWORD=${DB_PASSWORD}" "REDIS_HOST=${REDIS_HOST}" "REDIS_PORT=${REDIS_PORT}" "REDIS_PASSWORD=${REDIS_PASSWORD}" "JWT_SECRET=${JWT_SECRET}" "PYTHON_AGENT_URL=http://127.0.0.1:5001" > "$SHARED_DIR/java-backend.env"
 
@@ -235,3 +245,10 @@ jobs:
               sleep 2
             done
             curl --fail --silent http://127.0.0.1:5001/api/v1/health >/dev/null
+
+            find "$APP_DIR/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+              | sort -nr \
+              | awk -v keep="$KEEP_RELEASES" 'NR > keep { $1=""; sub(/^ /, ""); print }' \
+              | xargs -r rm -rf --
+
+            rm -rf "$HOME/.cache/pip"
