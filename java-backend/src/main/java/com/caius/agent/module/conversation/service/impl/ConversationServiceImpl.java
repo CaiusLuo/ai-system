@@ -3,7 +3,6 @@ package com.caius.agent.module.conversation.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
-import com.caius.agent.common.exception.BusinessException;
 import com.caius.agent.dao.ConversationMapper;
 import com.caius.agent.dao.MessageMapper;
 import com.caius.agent.dao.UserMapper;
@@ -44,6 +43,8 @@ public class ConversationServiceImpl implements ConversationService {
         List<Conversation> conversations = conversationMapper.selectList(
                 new LambdaQueryWrapper<Conversation>()
                         .eq(Conversation::getUserId, userId)
+                        // 删除对话不显示
+                        .eq(Conversation::getDeleted, 0)
                         .orderByDesc(Conversation::getCreatedAt)
         );
 
