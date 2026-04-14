@@ -72,7 +72,7 @@ export function generateWebApplicationLD(data: {
     name: data.name,
     description: data.description,
     url: data.url,
-    applicationCategory: data.applicationCategory || 'ChatApplication',
+    applicationCategory: data.applicationCategory || 'JobSearchApplication',
     operatingSystem: data.operatingSystem || 'Any',
     browserRequirements: 'Requires JavaScript',
     ...(data.offers && {

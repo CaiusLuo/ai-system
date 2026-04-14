@@ -2,20 +2,104 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --app-canvas: #f4f6f5;
+  --surface-raised: #ffffff;
+  --surface-soft: #f0f3f3;
+  --surface-muted: #dfe6e7;
+  --border-subtle: #d5dfe2;
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-muted: #6b7280;
+
+  --accent-050: #eaf2f3;
+  --accent-200: #c6dadd;
+  --accent-300: #aac6c9;
+  --accent-500: #4f7f85;
+  --accent-700: #245f66;
+  --accent-800: #1c4f55;
+
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-soft: 0 8px 20px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.dark {
+  --app-canvas: #101415;
+  --surface-raised: #171d1f;
+  --surface-soft: #1c2527;
+  --surface-muted: #2b3638;
+  --border-subtle: #334246;
+  --text-primary: #e6eaed;
+  --text-secondary: #c5cbd0;
+  --text-muted: #9ca3af;
+
+  --accent-050: #1d2b2d;
+  --accent-200: #35575d;
+  --accent-300: #447078;
+  --accent-500: #5b8d93;
+  --accent-700: #6da2a8;
+  --accent-800: #7cb2b9;
+}
+
 @layer base {
   * {
     @apply box-border;
   }
 
-  html, body, #root {
-    @apply h-full m-0 p-0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-    "Helvetica Neue", Arial, sans-serif;
+  html,
+  body,
+  #root {
+    @apply m-0 h-full p-0;
+    font-family: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
   }
 
   body {
-    @apply font-sans antialiased bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+    background: var(--app-canvas);
+    color: var(--text-primary);
+    @apply antialiased;
+    overflow-x: hidden;
+  }
+}
+
+@layer components {
+  .surface-panel {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    background: var(--accent-700);
+    color: #fff;
+    font-weight: 600;
+    transition: background-color 150ms ease;
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-800);
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-weight: 600;
+    transition: background-color 150ms ease, border-color 150ms ease;
+  }
+
+  .btn-secondary:hover {
+    background: var(--surface-soft);
+    border-color: var(--accent-200);
   }
 }
 
@@ -29,18 +113,29 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+    background: #b8c5c8;
+    border-radius: 9999px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-400 dark:bg-gray-500;
+    background: #9dafb4;
+  }
+
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #455459;
+  }
+
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: #54656b;
   }
 }
 
-/* Markdown 渲染样式 */
 .markdown-body {
-  @apply text-[15.5px] leading-[1.82] tracking-[0.012em] text-gray-800 dark:text-gray-200;
+  @apply text-[15.5px] leading-[1.82] tracking-[0.012em];
+  color: var(--text-primary);
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body p {
@@ -48,15 +143,15 @@
 }
 
 .markdown-body h1 {
-  @apply text-[1.3rem] leading-[1.45] font-semibold tracking-[0.008em] mt-5 mb-2.5;
+  @apply mt-5 mb-2.5 text-[1.3rem] font-semibold leading-[1.45] tracking-[0.008em];
 }
 
 .markdown-body h2 {
-  @apply text-[1.14rem] leading-[1.5] font-semibold tracking-[0.007em] mt-4 mb-2;
+  @apply mt-4 mb-2 text-[1.14rem] font-semibold leading-[1.5] tracking-[0.007em];
 }
 
 .markdown-body h3 {
-  @apply text-[1.02rem] leading-[1.55] font-semibold tracking-[0.006em] mt-3.5 mb-1.5;
+  @apply mt-3.5 mb-1.5 text-[1.02rem] font-semibold leading-[1.55] tracking-[0.006em];
 }
 
 .markdown-body strong {
@@ -64,11 +159,11 @@
 }
 
 .markdown-body ul {
-  @apply list-disc pl-5 my-2.5 space-y-1.5;
+  @apply my-2.5 list-disc space-y-1.5 pl-5;
 }
 
 .markdown-body ol {
-  @apply list-decimal pl-5 my-2.5 space-y-1.5;
+  @apply my-2.5 list-decimal space-y-1.5 pl-5;
 }
 
 .markdown-body li {
@@ -76,51 +171,65 @@
 }
 
 .markdown-body a {
-  @apply text-blue-600 dark:text-blue-400 hover:underline;
+  color: var(--accent-700);
+  @apply hover:underline;
+  word-break: break-all;
 }
 
 .markdown-body blockquote {
-  @apply my-3 border-l-2 border-gray-300 dark:border-gray-600 pl-3.5 py-0.5 text-[0.95em] leading-[1.8] text-gray-600 dark:text-gray-300;
+  @apply my-3 border-l-2 py-0.5 pl-3.5 text-[0.95em] leading-[1.8];
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 .markdown-body code {
-  @apply px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-[0.84em] font-medium font-mono;
+  @apply rounded px-1.5 py-0.5 text-[0.84em] font-medium font-mono;
+  background: var(--surface-soft);
 }
 
 .markdown-body pre {
-  @apply my-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/70 px-3.5 py-3 overflow-x-auto;
+  @apply my-3 overflow-x-auto rounded-[var(--radius-md)] border px-3.5 py-3;
+  border-color: var(--border-subtle);
+  background: var(--surface-soft);
+  max-width: 100%;
 }
 
 .markdown-body pre code {
-  @apply block p-0 bg-transparent rounded-none text-[13px] leading-6 font-mono overflow-visible;
+  @apply block rounded-none bg-transparent p-0 text-[13px] leading-6 font-mono overflow-visible;
 }
 
 .markdown-body table {
-  @apply min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-[0.9em] my-3;
+  @apply my-3 min-w-full divide-y text-[0.9em];
+  width: max-content;
+  --tw-divide-opacity: 1;
+  border-color: var(--border-subtle);
 }
 
 .markdown-body th {
-  @apply px-3 py-2 bg-gray-50 dark:bg-gray-800 font-semibold text-left;
+  @apply px-3 py-2 text-left font-semibold;
+  background: var(--surface-soft);
 }
 
 .markdown-body td {
-  @apply px-3 py-2 border-t border-gray-200 dark:border-gray-700 align-top;
+  @apply align-top border-t px-3 py-2;
+  border-color: var(--border-subtle);
 }
 
 .markdown-body hr {
-  @apply my-4 border-gray-200 dark:border-gray-700;
+  @apply my-4;
+  border-color: var(--border-subtle);
 }
 
 .markdown-body img {
-  @apply max-w-full h-auto my-3 rounded;
+  @apply my-3 h-auto max-w-full rounded;
 }
 
-/* 页面切换动画 */
 @keyframes slideInRight {
   from {
     opacity: 0;
     transform: translateX(20px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -132,6 +241,7 @@
     opacity: 1;
     transform: translateX(0);
   }
+
   to {
     opacity: 0;
     transform: translateX(-20px);
@@ -142,6 +252,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -152,35 +263,41 @@
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
 
-/* 骨架屏动画 */
 @keyframes shimmer {
   0% {
     background-position: -200% 0;
   }
+
   100% {
     background-position: 200% 0;
   }
 }
 
 .skeleton {
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, #edf1f2 25%, #e2e8ea 50%, #edf1f2 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
 
 .dark .skeleton {
-  background: linear-gradient(90deg, #2d2d2d 25%, #3d3d3d 50%, #2d2d2d 75%);
+  background: linear-gradient(90deg, #263234 25%, #324144 50%, #263234 75%);
   background-size: 200% 100%;
 }
 
-/* 打字机光标动画 */
 @keyframes typing {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
 }

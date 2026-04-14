@@ -1,4 +1,4 @@
-import { useState, KeyboardEvent, ChangeEvent, useEffect, useRef } from 'react';
+import { useState, type KeyboardEvent, type ChangeEvent, useEffect, useRef } from 'react';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -9,35 +9,40 @@ interface ChatInputProps {
   autoFocus?: boolean;
 }
 
-export default function ChatInput({ 
-  onSend, 
-  isLoading, 
-  onStop, 
-  disabled, 
+export default function ChatInput({
+  onSend,
+  isLoading,
+  onStop,
+  disabled,
   placeholder = '输入你的问题...',
   autoFocus = false,
 }: ChatInputProps) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // 自动聚焦
   useEffect(() => {
     if (autoFocus && textareaRef.current && !disabled) {
       textareaRef.current.focus();
     }
   }, [autoFocus, disabled]);
 
+  const resetTextareaHeight = () => {
+    if (!textareaRef.current) {
+      return;
+    }
+
+    textareaRef.current.style.height = 'auto';
+  };
+
   const handleSend = () => {
     const trimmed = input.trim();
-    if (!trimmed || isLoading || disabled) return;
+    if (!trimmed || isLoading || disabled) {
+      return;
+    }
 
     onSend(trimmed);
     setInput('');
-    
-    // 重置 textarea 高度
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    resetTextareaHeight();
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -50,35 +55,26 @@ export default function ChatInput({
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
 
-    // 自适应高度
     const textarea = e.target;
     textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
   };
 
   const isDisabled = disabled || isLoading;
 
   return (
-    <div className="border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-4">
-      <div className="max-w-3xl mx-auto">
-        {/* 禁用提示 */}
+    <div
+      className="shrink-0 border-t border-[var(--border-subtle)] bg-[rgba(247,247,245,0.92)] px-3 pt-3 backdrop-blur-sm sm:px-4 sm:pt-3.5"
+      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)' }}
+    >
+      <div className="mx-auto w-full max-w-4xl">
         {disabled && (
-          <div className="mb-3 text-xs text-gray-400 dark:text-gray-500 text-center">
+          <div className="mb-2 text-center text-xs text-[var(--text-muted)]">
             账户已禁用，无法发送消息
           </div>
         )}
 
-        {/* 输入框容器 */}
-        <div className="
-          relative
-          flex items-end gap-2
-          bg-gray-50 dark:bg-gray-800
-          border border-gray-200 dark:border-gray-700
-          rounded-2xl
-          focus-within:border-gray-300 dark:focus-within:border-gray-600
-          focus-within:ring-1 focus-within:ring-gray-300 dark:focus-within:ring-gray-600
-          transition-all duration-200
-        ">
+        <div className="relative flex items-end gap-2 rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-1.5 py-1.5 transition-colors duration-200 focus-within:border-[var(--accent-300)] focus-within:ring-1 focus-within:ring-[var(--accent-200)]">
           <textarea
             ref={textareaRef}
             value={input}
@@ -87,38 +83,20 @@ export default function ChatInput({
             placeholder={placeholder}
             rows={1}
             disabled={isDisabled}
-            className="
-              flex-1
-              resize-none
-              bg-transparent
-              px-4 py-3.5
-              text-[15px] leading-relaxed
-              text-gray-900 dark:text-gray-100
-              placeholder-gray-400 dark:placeholder-gray-500
-              focus:outline-none
-              disabled:opacity-50 disabled:cursor-not-allowed
-              scrollbar-thin
-            "
-            style={{ minHeight: '52px', maxHeight: '200px' }}
+            enterKeyHint="send"
+            className="scrollbar-thin min-h-[48px] flex-1 resize-none bg-transparent px-3 py-2.5 text-[16px] leading-relaxed text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-[15px]"
+            style={{ maxHeight: '180px' }}
           />
 
-          {/* 发送/停止按钮 */}
-          <div className="flex-shrink-0 pb-2 pr-2">
+          <div className="flex-shrink-0 pb-0.5 pr-0.5">
             {isLoading ? (
               <button
                 onClick={onStop}
-                className="
-                  w-9 h-9
-                  flex items-center justify-center
-                  bg-gray-900 dark:bg-gray-100
-                  hover:bg-gray-800 dark:hover:bg-gray-200
-                  text-white dark:text-gray-900
-                  rounded-xl
-                  transition-colors duration-150
-                "
+                className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-md)] bg-[var(--accent-700)] text-white transition-colors duration-150 hover:bg-[var(--accent-800)]"
                 title="停止生成"
+                aria-label="停止生成"
               >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
                 </svg>
               </button>
@@ -127,18 +105,16 @@ export default function ChatInput({
                 onClick={handleSend}
                 disabled={!input.trim() || isDisabled}
                 className={`
-                  w-9 h-9
-                  flex items-center justify-center
-                  rounded-xl
-                  transition-all duration-150
+                  flex h-10 w-10 items-center justify-center rounded-[var(--radius-md)] transition-colors duration-150
                   ${
                     input.trim() && !isDisabled
-                      ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                      ? 'bg-[var(--accent-700)] text-white hover:bg-[var(--accent-800)]'
+                      : 'cursor-not-allowed bg-[var(--surface-muted)] text-[var(--text-muted)]'
                   }
                 `}
+                aria-label="发送消息"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
                 </svg>
               </button>
@@ -146,9 +122,8 @@ export default function ChatInput({
           </div>
         </div>
 
-        {/* 底部提示 */}
         {!isLoading && (
-          <p className="text-xs text-gray-400 dark:text-gray-500 text-center mt-3">
+          <p className="mt-2 hidden text-center text-xs text-[var(--text-muted)] sm:block">
             按 Enter 发送，Shift + Enter 换行
           </p>
         )}

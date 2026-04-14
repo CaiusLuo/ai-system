@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { login, register } from '../services/auth';
 import Button from '../components/Button';
 import Input from '../components/Input';
+import { LoginAmbientMotion, SidebarBrandMotion } from '../remotion';
 
 type AuthMode = 'login' | 'register';
 
@@ -38,13 +39,11 @@ export default function AuthPage() {
       } else {
         const response = await register({ username, email, password });
         if (response.code === 200) {
-          // 注册成功后切换到登录模式
           setMode('login');
           setError('');
           setUsername('');
           setEmail('');
           setPassword('');
-          // 显示成功提示（使用 error 状态显示成功消息）
           setError('注册成功，请登录');
         } else {
           setError(response.message || '注册失败');
@@ -67,92 +66,105 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
-      <div className="max-w-md w-full">
-        {/* Logo 和标题 */}
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
-            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
+    <div className="relative min-h-screen overflow-hidden bg-[var(--app-canvas)] px-4 py-8 sm:px-6">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-0 bg-[radial-gradient(120%_70%_at_50%_0%,rgba(17,24,39,0.06),transparent_58%)]" />
+        <LoginAmbientMotion className="absolute inset-0" opacity={0.52} />
+      </div>
+
+      <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-md items-center">
+        <div className="w-full">
+          <div className="mb-6 flex items-center gap-3">
+            <div className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] text-[var(--accent-700)] shadow-[var(--shadow-soft)]">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  d="M4 7.5h16M6.5 4.5h11A1.5 1.5 0 0119 6v12a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 18V6a1.5 1.5 0 011.5-1.5zm2.5 7h6m-6 3h4"
+                />
+              </svg>
+              <SidebarBrandMotion className="absolute inset-0" opacity={0.36} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">求职工作台</p>
+              <p className="text-xs text-[var(--text-muted)]">岗位匹配与投递管理</p>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">AI 助手</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            {mode === 'login' ? '欢迎回来，请登录您的账户' : '创建新账户开始使用'}
-          </p>
-        </div>
 
-        {/* 表单卡片 */}
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* 错误提示 */}
-            {error && (
-              <div className={`px-4 py-3 rounded-lg text-sm ${
-                error.includes('成功') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-              }`}>
-                {error}
-              </div>
-            )}
+          <section className="surface-panel p-6 sm:p-7">
+            <div className="mb-6">
+              <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">
+                {mode === 'login' ? '登录账户' : '创建账户'}
+              </h1>
+              <p className="mt-1.5 text-sm text-[var(--text-secondary)]">
+                {mode === 'login' ? '继续管理你的求职进度' : '注册后可保存岗位与投递记录'}
+              </p>
+            </div>
 
-            {/* 用户名 */}
-            <Input
-              label="用户名"
-              type="text"
-              placeholder="请输入用户名"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoFocus
-            />
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div
+                  className={`rounded-[var(--radius-md)] border px-3.5 py-2.5 text-sm ${
+                    error.includes('成功')
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {error}
+                </div>
+              )}
 
-            {/* 邮箱（仅注册模式） */}
-            {mode === 'register' && (
               <Input
-                label="邮箱"
-                type="email"
-                placeholder="请输入邮箱"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                label="用户名"
+                type="text"
+                placeholder="请输入用户名"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                autoFocus
+              />
+
+              {mode === 'register' && (
+                <Input
+                  label="邮箱"
+                  type="email"
+                  placeholder="请输入邮箱"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              )}
+
+              <Input
+                label="密码"
+                type="password"
+                placeholder="请输入密码"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 required
               />
-            )}
 
-            {/* 密码 */}
-            <Input
-              label="密码"
-              type="password"
-              placeholder="请输入密码"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+              <Button type="submit" loading={loading} className="mt-1 w-full" size="md">
+                {mode === 'login' ? '登录' : '注册'}
+              </Button>
+            </form>
 
-            {/* 提交按钮 */}
-            <Button
-              type="submit"
-              loading={loading}
-              className="w-full"
-            >
-              {mode === 'login' ? '登录' : '注册'}
-            </Button>
-          </form>
+            <div className="mt-5 text-center">
+              <button
+                type="button"
+                onClick={switchMode}
+                className="text-sm font-medium text-[var(--accent-700)] transition-colors hover:text-[var(--accent-800)]"
+              >
+                {mode === 'login' ? '还没有账户？立即注册' : '已有账户？立即登录'}
+              </button>
+            </div>
+          </section>
 
-          {/* 切换模式 */}
-          <div className="mt-6 text-center">
-            <button
-              type="button"
-              onClick={switchMode}
-              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-            >
-              {mode === 'login' ? '还没有账户？立即注册' : '已有账户？立即登录'}
-            </button>
-          </div>
+          <p className="mt-5 text-center text-xs text-[var(--text-muted)]">
+            继续使用即表示你同意使用条款与隐私说明
+          </p>
         </div>
-
-        {/* 底部链接 */}
-        <p className="mt-6 text-center text-xs text-gray-500">
-          继续即表示您同意我们的使用条款
-        </p>
       </div>
     </div>
   );

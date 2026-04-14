@@ -13,6 +13,7 @@ export interface SEOConfig {
   ogDescription?: string;
   ogImage?: string;
   ogType?: string; // 'website' | 'article' | 'product'
+  ogSiteName?: string;
 
   // Twitter Card
   twitterCard?: string; // 'summary' | 'summary_large_image'
@@ -35,9 +36,9 @@ const DEFAULT_CONFIG: Partial<SEOConfig> = {
  * 
  * 用法:
  * useSEO({
- *   title: 'AI 智能助手 - 你的 AI 对话伙伴',
+ *   title: '求职工作台 - 岗位匹配与投递管理',
  *   description: '...',
- *   keywords: 'AI, 人工智能, 对话',
+ *   keywords: '求职管理,岗位匹配,简历优化',
  * });
  */
 export function useSEO(config: SEOConfig): void {
@@ -69,7 +70,7 @@ export function useSEO(config: SEOConfig): void {
   if (mergedConfig.ogType) {
     updateMetaProperty('og:type', mergedConfig.ogType);
   }
-  updateMetaProperty('og:site_name', 'AI 智能助手');
+  updateMetaProperty('og:site_name', mergedConfig.ogSiteName || '求职工作台');
   updateMetaProperty('og:locale', 'zh_CN');
 
   // Twitter Card

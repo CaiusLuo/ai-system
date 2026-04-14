@@ -11,10 +11,10 @@ const AuthPage = lazy(() => import('./pages/AuthPage'))
 // 加载状态（避免 CLS）
 function PageLoader() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--app-canvas)]">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        <span className="text-sm text-gray-500">加载中...</span>
+        <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[var(--accent-500)] border-t-transparent" />
+        <span className="text-sm text-[var(--text-muted)]">加载中...</span>
       </div>
     </div>
   )

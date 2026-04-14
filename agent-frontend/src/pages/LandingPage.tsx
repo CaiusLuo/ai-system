@@ -2,120 +2,111 @@ import { memo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSEO } from '../hooks/useSEO';
 import {
-  generateWebApplicationLD,
   generateFAQPageLD,
   generateOrganizationLD,
+  generateWebApplicationLD,
   injectStructuredData,
   removeStructuredData,
 } from '../utils/structuredData';
+import { HeroBackgroundMotion, SoftGridMotion } from '../remotion';
 
-// ============================================================
-// 数据定义（求职 Agent 场景）
-// ============================================================
-
-const SITE_URL = 'https://job-agent.example.com';
+const SITE_URL = 'https://job-workbench.example.com';
 const LOGO_URL = '/logo.svg';
 const OG_IMAGE_URL = '/og-image.jpg';
+const BRAND_NAME = '求职工作台';
 
 const FEATURES = [
   {
-    icon: '📋',
-    title: 'JD 计划设置',
-    description: '根据目标岗位定制 JD 分析计划，自动拆解职位要求，生成匹配度评估。',
+    badge: '01',
+    title: '岗位清单管理',
+    description: '按行业、城市、优先级整理目标岗位，避免重复投递和信息遗漏。',
   },
   {
-    icon: '🔍',
-    title: '岗位信息获取',
-    description: '实时抓取和聚合全网岗位信息，包括薪资、要求、公司规模等核心数据。',
+    badge: '02',
+    title: '简历版本维护',
+    description: '为不同岗位准备简历版本，统一记录修改点与投递关联关系。',
   },
   {
-    icon: '📄',
-    title: '简历针对性优化',
-    description: '根据目标 JD 智能优化简历，突出匹配关键词，提高简历通过率。',
+    badge: '03',
+    title: '投递进度追踪',
+    description: '标记每次投递、笔试和面试状态，让后续跟进更有节奏。',
   },
   {
-    icon: '🚀',
-    title: '自动化投递',
-    description: '一键批量投递匹配岗位，持续优化投递策略，提高面试邀约率。',
+    badge: '04',
+    title: '岗位匹配整理',
+    description: '围绕 JD 要求梳理匹配点，帮助你更快判断是否值得投入时间。',
   },
   {
-    icon: '📊',
-    title: '投递数据分析',
-    description: '可视化追踪投递进度、面试转化率、薪资分布等关键指标。',
+    badge: '05',
+    title: '反馈与复盘',
+    description: '沉淀投递反馈与面试记录，逐步形成可复用的求职方法。',
   },
   {
-    icon: '💡',
-    title: '求职策略建议',
-    description: '基于市场数据和你的背景，提供个性化的求职路径和技能提升建议。',
+    badge: '06',
+    title: '个人求职面板',
+    description: '将岗位、简历和会话聚合到同一工作台，长期使用也保持清晰。',
   },
 ];
 
 const FAQ_ITEMS = [
   {
-    question: '求职 Agent 是什么？',
-    answer: '求职 Agent 是基于 AI 的智能求职工具，能帮你：1) 分析目标岗位 JD；2) 自动获取全网岗位信息；3) 针对性优化简历；4) 自动化投递简历。全程 AI 辅助，大幅提高求职效率。',
+    question: '这个产品适合哪些人使用？',
+    answer: '适合正在求职或准备跳槽的用户。无论是应届生、转行用户还是有经验的求职者，都可以用它统一管理岗位、简历和投递进度。',
   },
   {
-    question: 'JD 计划设置有什么用？',
-    answer: '通过 JD 计划设置，AI 会帮你拆解目标岗位的关键词、技能要求、经验要求等，生成匹配度评分，并告诉你哪些岗位最适合你，避免盲目投递浪费时间。',
+    question: '主要能解决什么问题？',
+    answer: '主要解决信息分散和流程混乱的问题。你可以把岗位筛选、简历调整和投递记录集中在同一个工作台内，减少遗漏和重复劳动。',
   },
   {
-    question: '简历优化是如何工作的？',
-    answer: 'AI 会对比你的简历和目标 JD，找出匹配度不足的关键词，提供具体的修改建议：包括如何突出相关经验、如何调整技能描述、如何量化成果等，让你的简历更吸引 HR。',
+    question: '是否支持长期追踪投递过程？',
+    answer: '支持。你可以持续记录每个岗位的状态变化与反馈内容，便于后续复盘和策略调整。',
   },
   {
-    question: '自动化投递安全吗？',
-    answer: '自动化投递功能会模拟正常用户操作，遵守各招聘平台的使用规范。你可以设置每日投递上限、目标岗位范围等参数，确保投递质量。同时支持投递前的预览确认。',
-  },
-  {
-    question: '求职 Agent 收费吗？',
-    answer: '基础功能（JD 分析、岗位搜索、简历建议）免费使用。高级功能（自动化投递、深度数据分析、优先匹配）需要开通会员，具体请参考定价页面。',
-  },
-  {
-    question: '适合哪些求职阶段的人？',
-    answer: '适合所有求职阶段：应届生（不知道怎么找第一份工作）、1-3 年经验者（想跳槽但不知道市场情况）、资深人士（需要精准匹配高端岗位）、转行者（需要了解目标行业的岗位要求）。',
+    question: '注册后数据会保留吗？',
+    answer: '会。注册后可保存会话和求职记录，后续登录可以继续在原有进度上操作。',
   },
 ];
-
-// ============================================================
-// 组件
-// ============================================================
 
 export default function LandingPage() {
   const navigate = useNavigate();
 
-  // SEO 配置 - 针对求职场景
   useSEO({
-    title: '求职 Agent - AI 智能找工作 | 简历优化 | 自动投递',
-    description: '求职 Agent 是 AI 驱动的求职工具，支持 JD 计划设置、岗位信息获取、简历针对性优化、自动化投递等功能，帮你高效找到理想工作。',
-    keywords: '求职,找工作,简历优化,自动投递,JD分析,岗位搜索,面试,职业规划,AI求职,智能招聘',
+    title: `${BRAND_NAME} - 岗位匹配与求职管理平台`,
+    description: `${BRAND_NAME}用于集中管理岗位信息、简历版本与投递进度，帮助你更有条理地完成求职准备。`,
+    keywords: '求职管理,岗位匹配,简历优化,投递追踪,求职工作台,职业服务平台',
     canonicalUrl: SITE_URL,
-    ogTitle: '求职 Agent - AI 智能求职工具',
-    ogDescription: 'JD 计划设置、岗位信息获取、简历优化、自动化投递——一站式 AI 求职平台。',
+    ogTitle: `${BRAND_NAME} - 更清晰的求职工作台`,
+    ogDescription: '聚合岗位、整理简历、追踪投递进度，帮助你更稳定地推进求职流程。',
     ogImage: OG_IMAGE_URL,
-    twitterTitle: '求职 Agent - AI 智能求职工具',
-    twitterDescription: 'AI 驱动的求职工具，帮你高效找到理想工作。',
+    ogSiteName: BRAND_NAME,
+    twitterTitle: `${BRAND_NAME} - 求职管理平台`,
+    twitterDescription: '更有条理地管理岗位、简历和投递过程。',
     twitterImage: OG_IMAGE_URL,
   });
 
-  // 注入结构化数据
   useEffect(() => {
-    injectStructuredData('ld-webapp', generateWebApplicationLD({
-      name: '求职 Agent',
-      description: 'AI 驱动的智能求职工具，支持 JD 分析、简历优化、自动投递',
-      url: SITE_URL,
-      applicationCategory: 'JobSearchApplication',
-      offers: {
-        price: '0',
-        priceCurrency: 'CNY',
-      },
-    }));
+    injectStructuredData(
+      'ld-webapp',
+      generateWebApplicationLD({
+        name: BRAND_NAME,
+        description: '用于岗位匹配、简历维护与投递追踪的求职管理平台',
+        url: SITE_URL,
+        applicationCategory: 'JobSearchApplication',
+        offers: {
+          price: '0',
+          priceCurrency: 'CNY',
+        },
+      })
+    );
 
-    injectStructuredData('ld-org', generateOrganizationLD({
-      name: '求职 Agent',
-      url: SITE_URL,
-      logo: LOGO_URL,
-    }));
+    injectStructuredData(
+      'ld-org',
+      generateOrganizationLD({
+        name: BRAND_NAME,
+        url: SITE_URL,
+        logo: LOGO_URL,
+      })
+    );
 
     injectStructuredData('ld-faq', generateFAQPageLD(FAQ_ITEMS));
 
@@ -127,36 +118,21 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-      {/* Header */}
+    <div className="min-h-screen bg-[var(--app-canvas)] text-[var(--text-primary)]">
       <Header onNavigateChat={() => navigate('/chat')} />
 
       <main>
-        {/* Hero 区域 */}
         <HeroSection onNavigateChat={() => navigate('/chat')} />
-
-        {/* Features 区域 */}
         <FeaturesSection />
-
-        {/* 内容区（SEO 重点 - 长文本） */}
         <ContentSection />
-
-        {/* FAQ 区域 */}
         <FAQSection />
-
-        {/* CTA 区域 */}
         <CTASection onNavigateChat={() => navigate('/chat')} />
       </main>
 
-      {/* Footer */}
       <Footer />
     </div>
   );
 }
-
-// ============================================================
-// Header
-// ============================================================
 
 interface HeaderProps {
   onNavigateChat: () => void;
@@ -164,57 +140,48 @@ interface HeaderProps {
 
 const Header = memo(function Header({ onNavigateChat }: HeaderProps) {
   return (
-    <header
-      className="sticky top-0 z-50 border-b border-gray-100 dark:border-gray-800 bg-white/80 dark:bg-gray-950/80 backdrop-blur-md"
-      role="banner"
-    >
+    <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[rgba(247,247,245,0.86)] backdrop-blur-md">
       <nav
-        className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between"
+        className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8"
         role="navigation"
         aria-label="主导航"
       >
-        {/* Logo */}
-        <a
-          href="/"
-          className="flex items-center gap-2.5 group"
-          aria-label="求职 Agent - 首页"
-        >
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        <a href="/" className="flex items-center gap-3" aria-label={`${BRAND_NAME} - 首页`}>
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] text-[var(--accent-700)] shadow-[var(--shadow-soft)]">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.8}
+                d="M4 7.5h16M6.5 4.5h11A1.5 1.5 0 0119 6v12a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 18V6a1.5 1.5 0 011.5-1.5zm2.5 7h6m-6 3h4"
+              />
             </svg>
           </div>
-          <span className="font-semibold text-lg">求职 Agent</span>
+          <div>
+            <span className="block text-sm font-semibold tracking-tight text-[var(--text-primary)]">{BRAND_NAME}</span>
+            <span className="block text-[11px] text-[var(--text-muted)]">岗位匹配与投递管理</span>
+          </div>
         </a>
 
-        {/* 导航链接 */}
-        <div className="hidden sm:flex items-center gap-8">
-          <a href="#features" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+        <div className="hidden items-center gap-7 sm:flex">
+          <a href="#features" className="text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">
             功能
           </a>
-          <a href="#about" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
-            关于
+          <a href="#about" className="text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">
+            介绍
           </a>
-          <a href="#faq" className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
-            FAQ
+          <a href="#faq" className="text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">
+            常见问题
           </a>
         </div>
 
-        {/* CTA 按钮 */}
-        <button
-          onClick={onNavigateChat}
-          className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors shadow-sm hover:shadow"
-        >
-          开始使用
+        <button onClick={onNavigateChat} className="btn-primary h-10 px-4 text-sm">
+          进入工作台
         </button>
       </nav>
     </header>
   );
 });
-
-// ============================================================
-// Hero Section
-// ============================================================
 
 interface HeroSectionProps {
   onNavigateChat: () => void;
@@ -222,80 +189,40 @@ interface HeroSectionProps {
 
 function HeroSection({ onNavigateChat }: HeroSectionProps) {
   return (
-    <section
-      className="relative overflow-hidden pt-16 pb-20 sm:pt-24 sm:pb-32"
-      aria-labelledby="hero-heading"
-    >
-      {/* 背景装饰 */}
-      <div className="absolute inset-0 -z-10">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-r from-emerald-500/10 via-blue-500/10 to-purple-500/10 blur-3xl rounded-full" />
+    <section className="relative overflow-hidden border-b border-[var(--border-subtle)] py-16 sm:py-20" aria-labelledby="hero-heading">
+      <div className="pointer-events-none absolute inset-0">
+        <HeroBackgroundMotion className="absolute inset-0" opacity={0.5} />
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        {/* 标签 */}
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 mb-6 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 rounded-full border border-emerald-200 dark:border-emerald-800">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-          </span>
-          AI 驱动 · 智能求职
-        </div>
+      <div className="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-1 text-xs font-medium text-[var(--accent-700)]">
+            岗位匹配与求职管理
+          </p>
 
-        {/* 主标题 */}
-        <h1
-          id="hero-heading"
-          className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight"
-        >
-          让你的{' '}
-          <span className="bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
-            求职之路
-          </span>
-          <br />
-          更高效、更精准
-        </h1>
+          <h1 id="hero-heading" className="mt-5 text-3xl font-semibold leading-tight tracking-tight text-[var(--text-primary)] sm:text-4xl lg:text-[2.75rem]">
+            把岗位、简历和投递进度
+            <br className="hidden sm:block" />
+            整理在一个求职工作台中
+          </h1>
 
-        {/* 副标题 */}
-        <p className="mt-6 text-lg sm:text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">
-          JD 拆解 · 岗位聚合 · 简历优化 · 自动投递——AI 帮你一站式找工作。
-          <br className="hidden sm:block" />
-          告别海投，精准匹配，提高面试转化率。
-        </p>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-[var(--text-secondary)] sm:text-lg">
+            聚合岗位信息，维护简历版本，持续追踪每次投递与反馈。让求职准备更有条理，日常使用更稳定。
+          </p>
 
-        {/* CTA 按钮 */}
-        <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-          <button
-            onClick={onNavigateChat}
-            className="w-full sm:w-auto px-8 py-3.5 text-base font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:-translate-y-0.5 active:translate-y-0"
-          >
-            免费开始求职
-          </button>
-          <a
-            href="#features"
-            className="w-full sm:w-auto px-8 py-3.5 text-base font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl transition-all hover:-translate-y-0.5"
-          >
-            了解功能
-          </a>
-        </div>
-
-        {/* 信任指标 */}
-        <div className="mt-12 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500 dark:text-gray-400">
-          <div className="flex items-center gap-1.5">
-            <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-            免费使用
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <button onClick={onNavigateChat} className="btn-primary h-11 w-full px-5 text-sm sm:w-auto">
+              开始使用
+            </button>
+            <a href="#features" className="btn-secondary h-11 w-full px-5 text-sm sm:w-auto">
+              查看功能
+            </a>
           </div>
-          <div className="flex items-center gap-1.5">
-            <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-            智能匹配
-          </div>
-          <div className="flex items-center gap-1.5">
-            <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-            数据驱动
+
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-[var(--text-muted)]">
+            <span>流程清晰</span>
+            <span>记录可追踪</span>
+            <span>长期可复用</span>
           </div>
         </div>
       </div>
@@ -303,44 +230,31 @@ function HeroSection({ onNavigateChat }: HeroSectionProps) {
   );
 }
 
-// ============================================================
-// Features Section
-// ============================================================
-
 const FeaturesSection = memo(function FeaturesSection() {
   return (
-    <section
-      id="features"
-      className="py-20 sm:py-28 bg-gray-50 dark:bg-gray-900"
-      aria-labelledby="features-heading"
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* 标题 */}
-        <div className="text-center mb-16">
-          <h2 id="features-heading" className="text-3xl sm:text-4xl font-bold">
-            一站式 AI 求职解决方案
+    <section id="features" className="relative py-16 sm:py-20" aria-labelledby="features-heading">
+      <div className="pointer-events-none absolute inset-0">
+        <SoftGridMotion className="absolute inset-0" opacity={0.24} />
+      </div>
+
+      <div className="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="mb-10 text-center sm:mb-12">
+          <h2 id="features-heading" className="text-2xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-3xl">
+            支撑求职流程的核心能力
           </h2>
-          <p className="mt-4 text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-            从岗位分析到简历投递，AI 全程辅助你的求职流程
+          <p className="mx-auto mt-3 max-w-2xl text-[15px] leading-relaxed text-[var(--text-secondary)] sm:text-base">
+            从岗位筛选到投递复盘，围绕实际使用场景提供清晰的工作面板。
           </p>
         </div>
 
-        {/* 功能网格 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
-          {FEATURES.map((feature, idx) => (
-            <article
-              key={idx}
-              className="group p-6 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all hover:shadow-lg hover:-translate-y-1"
-            >
-              <div className="text-3xl mb-4" aria-hidden="true">
-                {feature.icon}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURES.map((feature) => (
+            <article key={feature.title} className="surface-panel p-5 sm:p-6">
+              <div className="mb-3 inline-flex rounded-md bg-[var(--accent-050)] px-2 py-1 text-xs font-semibold text-[var(--accent-700)]">
+                {feature.badge}
               </div>
-              <h3 className="text-lg font-semibold mb-2 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                {feature.title}
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-                {feature.description}
-              </p>
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">{feature.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">{feature.description}</p>
             </article>
           ))}
         </div>
@@ -349,53 +263,24 @@ const FeaturesSection = memo(function FeaturesSection() {
   );
 });
 
-// ============================================================
-// Content Section (SEO 重点 - 长文本内容)
-// ============================================================
-
 const ContentSection = memo(function ContentSection() {
   return (
-    <section
-      id="about"
-      className="py-20 sm:py-28"
-      aria-labelledby="about-heading"
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="max-w-3xl mx-auto">
-          {/* 标题 */}
-          <h2 id="about-heading" className="text-3xl sm:text-4xl font-bold text-center mb-12">
-            关于求职 Agent
+    <section id="about" className="border-y border-[var(--border-subtle)] bg-[var(--surface-soft)] py-16 sm:py-20" aria-labelledby="about-heading">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-3xl">
+          <h2 id="about-heading" className="text-center text-2xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-3xl">
+            更清晰地管理你的求职过程
           </h2>
 
-          {/* SEO 长文本内容 */}
-          <article className="prose prose-gray dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-emerald-600 dark:prose-a:text-emerald-400 prose-img:rounded-xl">
-            <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-              <strong>求职 Agent</strong>是基于 AI 大语言模型的智能求职工具。
-              它能帮你分析目标岗位 JD、获取全网岗位信息、针对性优化简历、自动化投递简历，
-              并提供数据驱动的求职策略建议，让你的求职之路更高效、更精准。
+          <article className="mt-8 space-y-6 text-[15px] leading-7 text-[var(--text-secondary)] sm:text-base">
+            <p>
+              这个平台关注的是求职过程管理：把岗位线索、简历准备、投递进度和反馈记录放在同一处，帮助你减少遗漏并形成稳定节奏。
             </p>
-
-            <h3 className="text-xl font-semibold mt-8 mb-4">核心功能</h3>
-            <ul className="list-disc list-outside ml-5 space-y-2 text-gray-600 dark:text-gray-400">
-              <li><strong>JD 计划设置</strong>：拆解岗位要求，生成关键词匹配度分析，告诉你哪些岗位最适合</li>
-              <li><strong>岗位信息获取</strong>：实时聚合各大平台的岗位数据，包括薪资、要求、公司规模等</li>
-              <li><strong>简历针对性优化</strong>：对比你的简历和目标 JD，提供具体的修改建议，提高简历通过率</li>
-              <li><strong>自动化投递</strong>：一键批量投递匹配岗位，持续优化投递策略，提高面试邀约率</li>
-            </ul>
-
-            <h3 className="text-xl font-semibold mt-8 mb-4">适用人群</h3>
-            <ul className="list-disc list-outside ml-5 space-y-2 text-gray-600 dark:text-gray-400">
-              <li><strong>应届生</strong>：不知道怎么找第一份工作，需要了解市场和岗位要求</li>
-              <li><strong>1-3 年经验者</strong>：想跳槽但不清楚市场薪资和机会，需要精准匹配</li>
-              <li><strong>资深人士</strong>：需要精准匹配高端岗位，避免浪费时间在不合适的机会上</li>
-              <li><strong>转行者</strong>：需要了解目标行业的岗位要求，找到技能匹配的切入点</li>
-            </ul>
-
-            <h3 className="text-xl font-semibold mt-8 mb-4">为什么选择我们？</h3>
-            <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-              求职 Agent <strong>免费开放</strong>基础功能，无需注册即可体验 JD 分析和岗位搜索。
-              我们使用 AI 大模型深度理解岗位需求和简历内容，提供比传统招聘平台更精准的匹配建议。
-              同时支持账户注册，以便保存求职记录和自动化投递设置。
+            <p>
+              当目标岗位较多时，最常见的问题是信息分散。通过统一面板，你可以快速查看当前优先岗位、已投递岗位和待跟进任务，避免重复操作。
+            </p>
+            <p>
+              在持续使用过程中，你还能沉淀一套自己的复盘资料。每次面试反馈和简历调整都可以关联到岗位上下文，让后续决策更有依据。
             </p>
           </article>
         </div>
@@ -404,32 +289,22 @@ const ContentSection = memo(function ContentSection() {
   );
 });
 
-// ============================================================
-// FAQ Section
-// ============================================================
-
 const FAQSection = memo(function FAQSection() {
   return (
-    <section
-      id="faq"
-      className="py-20 sm:py-28 bg-gray-50 dark:bg-gray-900"
-      aria-labelledby="faq-heading"
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* 标题 */}
-        <div className="text-center mb-12">
-          <h2 id="faq-heading" className="text-3xl sm:text-4xl font-bold">
+    <section id="faq" className="py-16 sm:py-20" aria-labelledby="faq-heading">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="mb-10 text-center sm:mb-12">
+          <h2 id="faq-heading" className="text-2xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-3xl">
             常见问题
           </h2>
-          <p className="mt-4 text-lg text-gray-600 dark:text-gray-400">
-            关于求职 Agent，你可能想知道的
+          <p className="mt-3 text-[15px] text-[var(--text-secondary)] sm:text-base">
+            使用前你可能关心的几个问题
           </p>
         </div>
 
-        {/* FAQ 列表 */}
-        <div className="max-w-3xl mx-auto space-y-4">
-          {FAQ_ITEMS.map((item, idx) => (
-            <FAQItem key={idx} question={item.question} answer={item.answer} />
+        <div className="mx-auto max-w-3xl space-y-3.5">
+          {FAQ_ITEMS.map((item) => (
+            <FAQItem key={item.question} question={item.question} answer={item.answer} />
           ))}
         </div>
       </div>
@@ -437,35 +312,28 @@ const FAQSection = memo(function FAQSection() {
   );
 });
 
-// ============================================================
-// FAQ Item（可折叠）
-// ============================================================
-
 interface FAQItemProps {
   question: string;
   answer: string;
 }
 
 function FAQItem({ question, answer }: FAQItemProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [open, setOpen] = useState(false);
 
   return (
-    <details
-      className="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden"
-      open={isOpen}
-    >
+    <details open={open} className="surface-panel overflow-hidden">
       <summary
-        className="flex items-center justify-between cursor-pointer p-5 list-none hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
-        onClick={(e) => {
-          e.preventDefault();
-          setIsOpen(!isOpen);
+        className="flex cursor-pointer list-none items-center justify-between px-5 py-4 text-left"
+        onClick={(event) => {
+          event.preventDefault();
+          setOpen(!open);
         }}
         role="button"
-        aria-expanded={isOpen}
+        aria-expanded={open}
       >
-        <h3 className="text-base font-medium pr-4">{question}</h3>
+        <span className="pr-4 text-sm font-medium text-[var(--text-primary)] sm:text-[15px]">{question}</span>
         <svg
-          className="w-5 h-5 text-gray-500 flex-shrink-0 transition-transform duration-200 group-open:rotate-180"
+          className={`h-4 w-4 flex-shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -474,16 +342,12 @@ function FAQItem({ question, answer }: FAQItemProps) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </summary>
-      <div className="px-5 pb-5 text-sm text-gray-600 dark:text-gray-400 leading-relaxed border-t border-gray-100 dark:border-gray-700 pt-4">
+      <div className="border-t border-[var(--border-subtle)] px-5 pb-4 pt-3.5 text-sm leading-relaxed text-[var(--text-secondary)]">
         {answer}
       </div>
     </details>
   );
 }
-
-// ============================================================
-// CTA Section
-// ============================================================
 
 interface CTASectionProps {
   onNavigateChat: () => void;
@@ -491,92 +355,94 @@ interface CTASectionProps {
 
 function CTASection({ onNavigateChat }: CTASectionProps) {
   return (
-    <section
-      className="py-20 sm:py-28"
-      aria-labelledby="cta-heading"
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 to-blue-700 px-6 py-16 sm:px-12 sm:py-20 text-center text-white">
-          {/* 背景装饰 */}
-          <div className="absolute inset-0 -z-0">
-            <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
-            <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
-          </div>
-
-          <div className="relative z-10">
-            <h2 id="cta-heading" className="text-3xl sm:text-4xl font-bold">
-              开始你的高效求职之旅
-            </h2>
-            <p className="mt-4 text-lg text-emerald-100 max-w-xl mx-auto">
-              免费体验 JD 分析和岗位搜索，让 AI 帮你找到理想工作
-            </p>
-            <button
-              onClick={onNavigateChat}
-              className="mt-8 px-8 py-3.5 text-base font-semibold text-emerald-700 bg-white hover:bg-emerald-50 rounded-xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5"
-            >
-              免费开始使用
-            </button>
-          </div>
+    <section className="py-16 sm:py-20" aria-labelledby="cta-heading">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="surface-panel px-6 py-10 text-center sm:px-10 sm:py-12">
+          <h2 id="cta-heading" className="text-2xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-3xl">
+            从今天开始整理你的求职进度
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-[var(--text-secondary)] sm:text-base">
+            统一管理岗位、简历和投递记录，减少重复操作，提升执行效率。
+          </p>
+          <button onClick={onNavigateChat} className="btn-primary mt-7 h-11 px-6 text-sm">
+            进入工作台
+          </button>
         </div>
       </div>
     </section>
   );
 }
 
-// ============================================================
-// Footer
-// ============================================================
-
 const Footer = memo(function Footer() {
-  const currentYear = new Date().getFullYear();
+  const year = new Date().getFullYear();
 
   return (
-    <footer
-      className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950"
-      role="contentinfo"
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {/* 品牌信息 */}
-          <div>
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <span className="font-semibold">求职 Agent</span>
+    <footer className="border-t border-[var(--border-subtle)] bg-[var(--surface-raised)]" role="contentinfo">
+      <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-8 px-4 py-10 sm:px-6 lg:grid-cols-3 lg:px-8">
+        <div>
+          <div className="mb-3 flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--accent-700)]">
+              <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  d="M4 7.5h16M6.5 4.5h11A1.5 1.5 0 0119 6v12a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 18V6a1.5 1.5 0 011.5-1.5z"
+                />
+              </svg>
             </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-              AI 驱动的智能求职工具，帮你高效找到理想工作。
-            </p>
+            <span className="text-sm font-semibold text-[var(--text-primary)]">{BRAND_NAME}</span>
           </div>
-
-          {/* 快速链接 */}
-          <nav aria-label="快速链接">
-            <h3 className="font-medium mb-4">快速链接</h3>
-            <ul className="space-y-2 text-sm">
-              <li><a href="#features" className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">功能介绍</a></li>
-              <li><a href="#about" className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">关于我们</a></li>
-              <li><a href="#faq" className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">常见问题</a></li>
-            </ul>
-          </nav>
-
-          {/* 法律信息 */}
-          <nav aria-label="法律信息">
-            <h3 className="font-medium mb-4">法律信息</h3>
-            <ul className="space-y-2 text-sm">
-              <li><a href="/privacy" className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">隐私政策</a></li>
-              <li><a href="/terms" className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">使用条款</a></li>
-              <li><a href="/contact" className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">联系我们</a></li>
-            </ul>
-          </nav>
+          <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
+            聚合岗位、整理简历、追踪投递进度，帮助你更有条理地完成求职准备。
+          </p>
         </div>
 
-        {/* 版权信息 */}
-        <div className="mt-10 pt-8 border-t border-gray-200 dark:border-gray-800 text-center text-sm text-gray-500 dark:text-gray-400">
-          <p>&copy; {currentYear} 求职 Agent. 保留所有权利.</p>
-        </div>
+        <nav aria-label="快速链接">
+          <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">快速链接</h3>
+          <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
+            <li>
+              <a href="#features" className="transition-colors hover:text-[var(--text-primary)]">
+                功能介绍
+              </a>
+            </li>
+            <li>
+              <a href="#about" className="transition-colors hover:text-[var(--text-primary)]">
+                使用说明
+              </a>
+            </li>
+            <li>
+              <a href="#faq" className="transition-colors hover:text-[var(--text-primary)]">
+                常见问题
+              </a>
+            </li>
+          </ul>
+        </nav>
+
+        <nav aria-label="法律信息">
+          <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">法律信息</h3>
+          <ul className="space-y-2 text-sm text-[var(--text-secondary)]">
+            <li>
+              <a href="/privacy" className="transition-colors hover:text-[var(--text-primary)]">
+                隐私政策
+              </a>
+            </li>
+            <li>
+              <a href="/terms" className="transition-colors hover:text-[var(--text-primary)]">
+                使用条款
+              </a>
+            </li>
+            <li>
+              <a href="/contact" className="transition-colors hover:text-[var(--text-primary)]">
+                联系我们
+              </a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+
+      <div className="border-t border-[var(--border-subtle)] px-4 py-5 text-center text-xs text-[var(--text-muted)] sm:px-6 lg:px-8">
+        © {year} {BRAND_NAME}. 保留所有权利。
       </div>
     </footer>
   );
