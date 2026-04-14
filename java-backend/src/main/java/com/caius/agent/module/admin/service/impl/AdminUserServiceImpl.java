@@ -176,6 +176,11 @@ public class AdminUserServiceImpl implements AdminUserService {
             existUser.setEmail(request.getEmail());
         }
 
+        // 更新密码（如果提供）
+        if (StringUtils.hasText(request.getPassword())) {
+            existUser.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+
         userMapper.updateById(existUser);
 
         log.info("更新用户成功: id={}, username={}", id, existUser.getUsername());

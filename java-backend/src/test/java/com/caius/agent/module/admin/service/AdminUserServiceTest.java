@@ -13,6 +13,7 @@ import com.caius.agent.module.user.entity.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -194,9 +195,11 @@ class AdminUserServiceTest {
         request.setEmail("updated@example.com");
         request.setRole("ADMIN");
         request.setStatus("ACTIVE");
+        request.setPassword("newpassword123");
 
         when(userMapper.selectById(1L)).thenReturn(testUser);
         when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(passwordEncoder.encode("newpassword123")).thenReturn("hashedNewPassword123");
         when(userMapper.updateById(any(User.class))).thenReturn(1);
 
         // 执行测试
@@ -211,7 +214,13 @@ class AdminUserServiceTest {
 
         verify(userMapper, times(1)).selectById(1L);
         verify(userMapper, times(2)).selectCount(any(LambdaQueryWrapper.class));
+        verify(passwordEncoder, times(1)).encode("newpassword123");
         verify(userMapper, times(1)).updateById(any(User.class));
+
+        // 验证密码已加密写入（不应存明文）
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).updateById(userCaptor.capture());
+        assertEquals("hashedNewPassword123", userCaptor.getValue().getPassword());
     }
 
     @Test
