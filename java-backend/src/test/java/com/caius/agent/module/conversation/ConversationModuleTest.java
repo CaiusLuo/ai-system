@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
@@ -123,6 +124,28 @@ class ConversationModuleTest {
             assertNotNull(result);
             assertEquals(1, result.size());
             assertNull(result.get(0).getLastMessageContent());
+        }
+
+        @Test
+        @DisplayName("获取会话列表 - 最新消息查询不按 userId 过滤")
+        void getConversations_LatestMessageQueryNotFilteredByUserId() {
+            Conversation conv = new Conversation();
+            conv.setId(1L);
+            conv.setUserId(1L);
+            conv.setTitle("Cross Device");
+            conv.setCreatedAt(LocalDateTime.now().minusDays(1));
+
+            when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
+                    .thenReturn(Arrays.asList(conv));
+            when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
+                    .thenReturn(Collections.emptyList());
+
+            conversationService.getConversations(1L);
+
+            ArgumentCaptor<LambdaQueryWrapper<Message>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+            verify(messageMapper).selectList(captor.capture());
+            String sqlSegment = captor.getValue().getCustomSqlSegment();
+            assertFalse(sqlSegment.contains("user_id"));
         }
     }
 

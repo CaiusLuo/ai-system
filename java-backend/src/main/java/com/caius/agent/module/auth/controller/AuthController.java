@@ -3,10 +3,12 @@ package com.caius.agent.module.auth.controller;
 import com.caius.agent.common.result.Result;
 import com.caius.agent.common.security.ClientIpResolver;
 import com.caius.agent.common.util.JwtUtil;
+import com.caius.agent.dao.UserMapper;
 import com.caius.agent.module.auth.dto.LoginRequest;
 import com.caius.agent.module.auth.dto.RegisterRequest;
 import com.caius.agent.module.auth.service.AuthService;
 import com.caius.agent.module.auth.service.RegistrationRateLimitService;
+import com.caius.agent.module.user.entity.User;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final RegistrationRateLimitService registrationRateLimitService;
     private final ClientIpResolver clientIpResolver;
+    private final UserMapper userMapper;
 
     @PostMapping("/login")
     public Result<Map<String, Object>> login(@Valid @RequestBody LoginRequest request) {
@@ -56,11 +59,16 @@ public class AuthController {
             HttpServletRequest request
     ) {
         String token = extractToken(request);
+        User user = userMapper.selectById(userId);
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("userId", userId);
-        data.put("username", jwtUtil.getUsername(token));
-        data.put("role", jwtUtil.getRole(token));
+        data.put("username", user != null ? user.getUsername() : jwtUtil.getUsername(token));
+        data.put("role", user != null ? user.getRole() : jwtUtil.getRole(token));
+        if (user != null) {
+            data.put("status", user.getStatus());
+            data.put("statusText", user.getStatus() != null && user.getStatus() == 1 ? "ACTIVE" : "DISABLED");
+        }
         data.put("expiresAt", jwtUtil.getExpirationTimestamp(token));
         data.put("expiresInSeconds", jwtUtil.getRemainingSeconds(token));
         data.put("expired", false);

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  currentUserResponseSchema,
   jwtPayloadSchema,
   loginParamsSchema,
   loginResponseSchema,
@@ -8,6 +9,7 @@ import {
   updateUserParamsSchema,
   userDtoSchema,
   type JwtPayload,
+  type CurrentUserResponse,
   type LoginParams,
   type LoginResponse,
   type RegisterParams,
@@ -211,9 +213,42 @@ export async function getUserInfoById(id: number): Promise<ApiResponse<UserDTO>>
   return api.get(`/user/${id}`, userDtoSchema);
 }
 
+export async function getCurrentUser(): Promise<ApiResponse<CurrentUserResponse>> {
+  const result = await api.get('/auth/me', currentUserResponseSchema);
+
+  if (result.code === 200 && result.data) {
+    const normalizedStatus =
+      result.data.status === 1
+        ? 'ACTIVE'
+        : result.data.status === 0
+          ? 'DISABLED'
+          : result.data.statusText === 'ACTIVE' || result.data.statusText === 'DISABLED'
+            ? result.data.statusText
+            : undefined;
+
+    setUserInfo({
+      userId: result.data.userId,
+      username: result.data.username,
+      role: result.data.role,
+      status: normalizedStatus,
+    });
+  }
+
+  return result;
+}
+
 export async function updateUserInfo(
   id: number,
   data: UpdateUserParams
 ): Promise<ApiResponse<null>> {
-  return api.put(`/user/${id}`, data, z.null(), updateUserParamsSchema);
+  const result = await api.put(`/user/${id}`, data, z.null(), updateUserParamsSchema);
+
+  if (result.code === 200) {
+    const current = getUserInfo();
+    if (current?.userId === id) {
+      await getCurrentUser();
+    }
+  }
+
+  return result;
 }

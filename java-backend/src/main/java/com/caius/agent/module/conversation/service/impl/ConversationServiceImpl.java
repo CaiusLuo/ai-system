@@ -56,7 +56,7 @@ public class ConversationServiceImpl implements ConversationService {
                 .collect(Collectors.toList());
 
         // 查询每个会话的最新消息
-        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(userId, conversationIds);
+        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(conversationIds);
 
         // 转换为 DTO
         return conversations.stream()
@@ -98,7 +98,7 @@ public class ConversationServiceImpl implements ConversationService {
     /**
      * 批量获取每个会话的最新消息
      */
-    private Map<Long, Message> getLatestMessagesByConversationIds(Long userId, List<Long> conversationIds) {
+    private Map<Long, Message> getLatestMessagesByConversationIds(List<Long> conversationIds) {
         if (CollectionUtils.isEmpty(conversationIds)) {
             return Collections.emptyMap();
         }
@@ -107,7 +107,6 @@ public class ConversationServiceImpl implements ConversationService {
         List<Message> latestMessages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
                         .in(Message::getConversationId, conversationIds)
-                        .eq(Message::getUserId, userId)
                         .orderByDesc(Message::getCreatedAt)
         );
 
