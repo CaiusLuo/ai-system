@@ -1,6 +1,7 @@
 package com.caius.agent.module.conversation.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
 import com.caius.agent.common.exception.BusinessException;
 import com.caius.agent.dao.ConversationMapper;
@@ -56,7 +57,7 @@ public class ConversationServiceImpl implements ConversationService {
                 .collect(Collectors.toList());
 
         // 查询每个会话的最新消息
-        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(userId, conversationIds);
+        Map<Long, Message> latestMessageMap = getLatestMessagesByConversationIds(conversationIds);
 
         // 转换为 DTO
         return conversations.stream()
@@ -98,18 +99,27 @@ public class ConversationServiceImpl implements ConversationService {
     /**
      * 批量获取每个会话的最新消息
      */
-    private Map<Long, Message> getLatestMessagesByConversationIds(Long userId, List<Long> conversationIds) {
+    private Map<Long, Message> getLatestMessagesByConversationIds(List<Long> conversationIds) {
         if (CollectionUtils.isEmpty(conversationIds)) {
             return Collections.emptyMap();
         }
 
-        // 查询所有会话的最新消息
-        List<Message> latestMessages = messageMapper.selectList(
-                new LambdaQueryWrapper<Message>()
-                        .in(Message::getConversationId, conversationIds)
-                        .eq(Message::getUserId, userId)
-                        .orderByDesc(Message::getCreatedAt)
-        );
+        QueryWrapper<Message> latestIdQuery = new QueryWrapper<>();
+        latestIdQuery.select("MAX(id) AS id")
+                .in("conversation_id", conversationIds)
+                .eq("deleted", 0)
+                .groupBy("conversation_id");
+        List<Object> latestIdObjs = messageMapper.selectObjs(latestIdQuery);
+        List<Long> latestIds = latestIdObjs.stream()
+                .filter(obj -> obj instanceof Number)
+                .map(obj -> ((Number) obj).longValue())
+                .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(latestIds)) {
+            return Collections.emptyMap();
+        }
+
+        // 批量读取每个会话的最新消息
+        List<Message> latestMessages = messageMapper.selectBatchIds(latestIds);
 
         // 按会话ID分组，取每个会话的第一条（最新）消息
         return latestMessages.stream()

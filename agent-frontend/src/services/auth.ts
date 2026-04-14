@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  currentUserResponseSchema,
   jwtPayloadSchema,
   loginParamsSchema,
   loginResponseSchema,
@@ -8,6 +9,7 @@ import {
   updateUserParamsSchema,
   userDtoSchema,
   type JwtPayload,
+  type CurrentUserResponse,
   type LoginParams,
   type LoginResponse,
   type RegisterParams,
@@ -176,6 +178,22 @@ export function isUserDisabled(): boolean {
   return getUserInfo()?.status === 'DISABLED';
 }
 
+function normalizeUserStatus(
+  status?: number,
+  statusText?: string
+): StoredUserInfo['status'] {
+  if (status === 1) {
+    return 'ACTIVE';
+  }
+  if (status === 0) {
+    return 'DISABLED';
+  }
+  if (statusText === 'ACTIVE' || statusText === 'DISABLED') {
+    return statusText;
+  }
+  return undefined;
+}
+
 export async function register(params: RegisterParams): Promise<ApiResponse<null>> {
   return api.post('/auth/register', params, z.null(), registerParamsSchema);
 }
@@ -211,9 +229,33 @@ export async function getUserInfoById(id: number): Promise<ApiResponse<UserDTO>>
   return api.get(`/user/${id}`, userDtoSchema);
 }
 
+export async function getCurrentUser(): Promise<ApiResponse<CurrentUserResponse>> {
+  const result = await api.get('/auth/me', currentUserResponseSchema);
+
+  if (result.code === 200 && result.data) {
+    setUserInfo({
+      userId: result.data.userId,
+      username: result.data.username,
+      role: result.data.role,
+      status: normalizeUserStatus(result.data.status, result.data.statusText),
+    });
+  }
+
+  return result;
+}
+
 export async function updateUserInfo(
   id: number,
   data: UpdateUserParams
 ): Promise<ApiResponse<null>> {
-  return api.put(`/user/${id}`, data, z.null(), updateUserParamsSchema);
+  const result = await api.put(`/user/${id}`, data, z.null(), updateUserParamsSchema);
+
+  if (result.code === 200) {
+    const current = getUserInfo();
+    if (current?.userId === id) {
+      await getCurrentUser();
+    }
+  }
+
+  return result;
 }

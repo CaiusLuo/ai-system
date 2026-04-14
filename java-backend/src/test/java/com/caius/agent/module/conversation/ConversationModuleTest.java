@@ -1,6 +1,7 @@
 package com.caius.agent.module.conversation;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.caius.agent.common.exception.BusinessException;
 import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
 import com.caius.agent.dao.ConversationMapper;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
@@ -81,7 +83,9 @@ class ConversationModuleTest {
 
             when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(conv));
-            when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
+            when(messageMapper.selectObjs(any(QueryWrapper.class)))
+                    .thenReturn(Arrays.asList(2L));
+            when(messageMapper.selectBatchIds(anyList()))
                     .thenReturn(Arrays.asList(latestMsg));
 
             List<ConversationDTO> result = conversationService.getConversations(1L);
@@ -115,7 +119,7 @@ class ConversationModuleTest {
 
             when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(conv));
-            when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
+            when(messageMapper.selectObjs(any(QueryWrapper.class)))
                     .thenReturn(Collections.emptyList());
 
             List<ConversationDTO> result = conversationService.getConversations(1L);
@@ -123,6 +127,28 @@ class ConversationModuleTest {
             assertNotNull(result);
             assertEquals(1, result.size());
             assertNull(result.get(0).getLastMessageContent());
+        }
+
+        @Test
+        @DisplayName("获取会话列表 - 最新消息查询不按 userId 过滤")
+        void getConversations_LatestMessageQueryNotFilteredByUserId() {
+            Conversation conv = new Conversation();
+            conv.setId(1L);
+            conv.setUserId(1L);
+            conv.setTitle("Cross Device");
+            conv.setCreatedAt(LocalDateTime.now().minusDays(1));
+
+            when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
+                    .thenReturn(Arrays.asList(conv));
+            when(messageMapper.selectObjs(any(QueryWrapper.class)))
+                    .thenReturn(Collections.emptyList());
+
+            conversationService.getConversations(1L);
+
+            ArgumentCaptor<QueryWrapper<Message>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+            verify(messageMapper).selectObjs(captor.capture());
+            String sqlSegment = captor.getValue().getCustomSqlSegment();
+            assertFalse(sqlSegment.contains("user_id"));
         }
     }
 

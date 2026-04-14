@@ -7,7 +7,9 @@ import MessageBubble from '../components/MessageBubble';
 import MessageSkeleton from '../components/MessageSkeleton';
 import ChatInput from '../components/ChatInput';
 import AdminPanel from './AdminPanel';
-import { logout, getUserInfo, AUTH_PAGE_PATH } from '../services/auth';
+import { logout, getCurrentUser, getUserInfo, AUTH_PAGE_PATH } from '../services/auth';
+import { getConversationList, type ConversationDTO } from '../services/conversation';
+import { CHAT_CONVERSATIONS_KEY } from '../services/chatStorage';
 import type {
   LocalConversationSummary,
   Message,
@@ -22,6 +24,73 @@ function storedToMessage(msg: StoredMessage): Message {
     content: msg.content,
     reasoning: msg.reasoning,
   };
+}
+
+function normalizeLastMessageTime(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  return Number.isNaN(Date.parse(value)) ? null : value;
+}
+
+function mergeBackendConversations(
+  storedConversations: StoredConversationMap,
+  remoteConversations: ConversationDTO[]
+): { nextConversations: StoredConversationMap; changed: boolean } {
+  const localKeyByBackendId = new Map<number, string>();
+
+  for (const [localKey, conversation] of Object.entries(storedConversations)) {
+    const backendId = conversation.backendId ?? conversation.id ?? undefined;
+    if (typeof backendId === 'number') {
+      localKeyByBackendId.set(backendId, localKey);
+    }
+  }
+
+  const nextConversations: StoredConversationMap = { ...storedConversations };
+  let changed = false;
+  const now = Date.now();
+
+  for (const remoteConversation of remoteConversations) {
+    const backendId = remoteConversation.id;
+    const createdAt = Date.parse(remoteConversation.createdAt);
+    const updatedAt = Date.parse(remoteConversation.updatedAt);
+    const localKey = localKeyByBackendId.get(backendId) ?? `server_${backendId}`;
+    const existing = nextConversations[localKey];
+
+    if (existing) {
+      nextConversations[localKey] = {
+        ...existing,
+        id: backendId,
+        backendId,
+        title: remoteConversation.title || existing.title,
+        lastMessageContent: remoteConversation.lastMessageContent,
+        lastMessageTime: normalizeLastMessageTime(remoteConversation.lastMessageTime),
+        createdAt: Number.isFinite(existing.createdAt)
+          ? existing.createdAt
+          : Number.isFinite(createdAt)
+            ? createdAt
+            : now,
+        updatedAt: Number.isFinite(updatedAt)
+          ? updatedAt
+          : existing.updatedAt,
+      };
+      changed = true;
+    } else {
+      nextConversations[localKey] = {
+        id: backendId,
+        backendId,
+        title: remoteConversation.title || '新对话',
+        messages: [],
+        lastMessageContent: remoteConversation.lastMessageContent,
+        lastMessageTime: normalizeLastMessageTime(remoteConversation.lastMessageTime),
+        createdAt: Number.isFinite(createdAt) ? createdAt : now,
+        updatedAt: Number.isFinite(updatedAt) ? updatedAt : now,
+      };
+      changed = true;
+    }
+  }
+
+  return { nextConversations, changed };
 }
 
 export default function ChatPage() {
@@ -75,6 +144,23 @@ export default function ChatPage() {
   // 智能滚动：用户手动滚动时不自动跟随
   const shouldAutoScrollRef = useRef(true);
 
+  const mergeBackendConversationsToLocal = useCallback((remoteConversations: ConversationDTO[]) => {
+    const storedConversations = getStoredConversations();
+    const { nextConversations, changed } = mergeBackendConversations(
+      storedConversations,
+      remoteConversations
+    );
+
+    if (changed) {
+      try {
+        localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(nextConversations));
+      } catch (storageError) {
+        console.warn('[ChatPage] 写入本地会话缓存失败:', storageError);
+      }
+      setLocalConversations(getLocalConvList());
+    }
+  }, [getLocalConvList]);
+
   // 加载用户信息
   useEffectHook(() => {
     const userInfo = getUserInfo();
@@ -88,6 +174,32 @@ export default function ChatPage() {
       setShowAdminPanel(true);
     }
   }, []);
+
+  useEffectHook(() => {
+    const bootstrapFromBackend = async () => {
+      try {
+        const me = await getCurrentUser();
+        if (me.code === 200 && me.data) {
+          setUsername(me.data.username);
+          setUserRole(me.data.role);
+          setUserDisabled(me.data.status === 0 || me.data.statusText === 'DISABLED');
+        }
+      } catch (error) {
+        console.warn('[ChatPage] 获取当前用户信息失败，继续使用本地缓存:', error);
+      }
+
+      try {
+        const response = await getConversationList();
+        if (response.code === 200 && response.data) {
+          mergeBackendConversationsToLocal(response.data);
+        }
+      } catch (error) {
+        console.warn('[ChatPage] 获取后端会话列表失败，继续使用本地缓存:', error);
+      }
+    };
+
+    void bootstrapFromBackend();
+  }, [mergeBackendConversationsToLocal]);
 
   // 加载本地对话列表
   const refreshLocalConvList = useCallback(() => {
