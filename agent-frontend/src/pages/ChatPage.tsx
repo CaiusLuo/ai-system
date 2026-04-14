@@ -26,6 +26,73 @@ function storedToMessage(msg: StoredMessage): Message {
   };
 }
 
+function normalizeLastMessageTime(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  return Number.isNaN(Date.parse(value)) ? null : value;
+}
+
+function mergeBackendConversations(
+  storedConversations: StoredConversationMap,
+  remoteConversations: ConversationDTO[]
+): { nextConversations: StoredConversationMap; changed: boolean } {
+  const localKeyByBackendId = new Map<number, string>();
+
+  for (const [localKey, conversation] of Object.entries(storedConversations)) {
+    const backendId = conversation.backendId ?? conversation.id ?? undefined;
+    if (typeof backendId === 'number') {
+      localKeyByBackendId.set(backendId, localKey);
+    }
+  }
+
+  const nextConversations: StoredConversationMap = { ...storedConversations };
+  let changed = false;
+  const now = Date.now();
+
+  for (const remoteConversation of remoteConversations) {
+    const backendId = remoteConversation.id;
+    const createdAt = Date.parse(remoteConversation.createdAt);
+    const updatedAt = Date.parse(remoteConversation.updatedAt);
+    const localKey = localKeyByBackendId.get(backendId) ?? `server_${backendId}`;
+    const existing = nextConversations[localKey];
+
+    if (existing) {
+      nextConversations[localKey] = {
+        ...existing,
+        id: backendId,
+        backendId,
+        title: remoteConversation.title || existing.title,
+        lastMessageContent: remoteConversation.lastMessageContent,
+        lastMessageTime: normalizeLastMessageTime(remoteConversation.lastMessageTime),
+        createdAt: Number.isFinite(existing.createdAt)
+          ? existing.createdAt
+          : Number.isFinite(createdAt)
+            ? createdAt
+            : now,
+        updatedAt: Number.isFinite(updatedAt)
+          ? updatedAt
+          : existing.updatedAt,
+      };
+      changed = true;
+    } else {
+      nextConversations[localKey] = {
+        id: backendId,
+        backendId,
+        title: remoteConversation.title || '新对话',
+        messages: [],
+        lastMessageContent: remoteConversation.lastMessageContent,
+        lastMessageTime: normalizeLastMessageTime(remoteConversation.lastMessageTime),
+        createdAt: Number.isFinite(createdAt) ? createdAt : now,
+        updatedAt: Number.isFinite(updatedAt) ? updatedAt : now,
+      };
+      changed = true;
+    }
+  }
+
+  return { nextConversations, changed };
+}
+
 export default function ChatPage() {
   const {
     messages: remoteMessages,
@@ -79,61 +146,14 @@ export default function ChatPage() {
 
   const mergeBackendConversationsToLocal = useCallback((remoteConversations: ConversationDTO[]) => {
     const storedConversations = getStoredConversations();
-    const localKeyByBackendId = new Map<number, string>();
-
-    for (const [localKey, conversation] of Object.entries(storedConversations)) {
-      const backendId = conversation.backendId ?? conversation.id ?? undefined;
-      if (typeof backendId === 'number') {
-        localKeyByBackendId.set(backendId, localKey);
-      }
-    }
-
-    let changed = false;
-    const now = Date.now();
-
-    for (const remoteConversation of remoteConversations) {
-      const backendId = remoteConversation.id;
-      const createdAt = Date.parse(remoteConversation.createdAt);
-      const updatedAt = Date.parse(remoteConversation.updatedAt);
-      const localKey = localKeyByBackendId.get(backendId) ?? `server_${backendId}`;
-      const existing = storedConversations[localKey];
-
-      if (existing) {
-        storedConversations[localKey] = {
-          ...existing,
-          id: backendId,
-          backendId,
-          title: remoteConversation.title || existing.title,
-          lastMessageContent: remoteConversation.lastMessageContent,
-          lastMessageTime: remoteConversation.lastMessageTime,
-          createdAt: Number.isFinite(existing.createdAt)
-            ? existing.createdAt
-            : Number.isFinite(createdAt)
-              ? createdAt
-              : now,
-          updatedAt: Number.isFinite(updatedAt)
-            ? updatedAt
-            : existing.updatedAt,
-        };
-        changed = true;
-      } else {
-        storedConversations[localKey] = {
-          id: backendId,
-          backendId,
-          title: remoteConversation.title || '新对话',
-          messages: [],
-          lastMessageContent: remoteConversation.lastMessageContent,
-          lastMessageTime: remoteConversation.lastMessageTime,
-          createdAt: Number.isFinite(createdAt) ? createdAt : now,
-          updatedAt: Number.isFinite(updatedAt) ? updatedAt : now,
-        };
-        changed = true;
-      }
-    }
+    const { nextConversations, changed } = mergeBackendConversations(
+      storedConversations,
+      remoteConversations
+    );
 
     if (changed) {
       try {
-        localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(storedConversations));
+        localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(nextConversations));
       } catch (storageError) {
         console.warn('[ChatPage] 写入本地会话缓存失败:', storageError);
       }

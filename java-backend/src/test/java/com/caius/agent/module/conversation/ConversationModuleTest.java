@@ -1,6 +1,7 @@
 package com.caius.agent.module.conversation;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.caius.agent.common.exception.BusinessException;
 import com.caius.agent.common.cache.UserScopedCacheKeyFactory;
 import com.caius.agent.dao.ConversationMapper;
@@ -82,7 +83,9 @@ class ConversationModuleTest {
 
             when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(conv));
-            when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
+            when(messageMapper.selectObjs(any(QueryWrapper.class)))
+                    .thenReturn(Arrays.asList(2L));
+            when(messageMapper.selectBatchIds(anyList()))
                     .thenReturn(Arrays.asList(latestMsg));
 
             List<ConversationDTO> result = conversationService.getConversations(1L);
@@ -116,7 +119,7 @@ class ConversationModuleTest {
 
             when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(conv));
-            when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
+            when(messageMapper.selectObjs(any(QueryWrapper.class)))
                     .thenReturn(Collections.emptyList());
 
             List<ConversationDTO> result = conversationService.getConversations(1L);
@@ -137,13 +140,13 @@ class ConversationModuleTest {
 
             when(conversationMapper.selectList(any(LambdaQueryWrapper.class)))
                     .thenReturn(Arrays.asList(conv));
-            when(messageMapper.selectList(any(LambdaQueryWrapper.class)))
+            when(messageMapper.selectObjs(any(QueryWrapper.class)))
                     .thenReturn(Collections.emptyList());
 
             conversationService.getConversations(1L);
 
-            ArgumentCaptor<LambdaQueryWrapper<Message>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-            verify(messageMapper).selectList(captor.capture());
+            ArgumentCaptor<QueryWrapper<Message>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+            verify(messageMapper).selectObjs(captor.capture());
             String sqlSegment = captor.getValue().getCustomSqlSegment();
             assertFalse(sqlSegment.contains("user_id"));
         }

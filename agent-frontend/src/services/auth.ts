@@ -178,6 +178,22 @@ export function isUserDisabled(): boolean {
   return getUserInfo()?.status === 'DISABLED';
 }
 
+function normalizeUserStatus(
+  status?: number,
+  statusText?: string
+): StoredUserInfo['status'] {
+  if (status === 1) {
+    return 'ACTIVE';
+  }
+  if (status === 0) {
+    return 'DISABLED';
+  }
+  if (statusText === 'ACTIVE' || statusText === 'DISABLED') {
+    return statusText;
+  }
+  return undefined;
+}
+
 export async function register(params: RegisterParams): Promise<ApiResponse<null>> {
   return api.post('/auth/register', params, z.null(), registerParamsSchema);
 }
@@ -217,20 +233,11 @@ export async function getCurrentUser(): Promise<ApiResponse<CurrentUserResponse>
   const result = await api.get('/auth/me', currentUserResponseSchema);
 
   if (result.code === 200 && result.data) {
-    const normalizedStatus =
-      result.data.status === 1
-        ? 'ACTIVE'
-        : result.data.status === 0
-          ? 'DISABLED'
-          : result.data.statusText === 'ACTIVE' || result.data.statusText === 'DISABLED'
-            ? result.data.statusText
-            : undefined;
-
     setUserInfo({
       userId: result.data.userId,
       username: result.data.username,
       role: result.data.role,
-      status: normalizedStatus,
+      status: normalizeUserStatus(result.data.status, result.data.statusText),
     });
   }
 
