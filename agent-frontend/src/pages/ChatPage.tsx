@@ -8,7 +8,11 @@ import MessageSkeleton from '../components/MessageSkeleton';
 import ChatInput from '../components/ChatInput';
 import AdminPanel from './AdminPanel';
 import { logout, getCurrentUser, getUserInfo, AUTH_PAGE_PATH } from '../services/auth';
-import { getConversationList, type ConversationDTO } from '../services/conversation';
+import {
+  getConversationList,
+  deleteConversation as deleteRemoteConversation,
+  type ConversationDTO,
+} from '../services/conversation';
 import { CHAT_CONVERSATIONS_KEY } from '../services/chatStorage';
 import type {
   LocalConversationSummary,
@@ -372,6 +376,19 @@ export default function ChatPage() {
 
     const convId = id as string;
     const isCurrentConv = getCurrentConvId() === convId;
+
+    const conversations = getStoredConversations();
+    const conversation = conversations[convId];
+    const backendId = conversation?.backendId ?? conversation?.id;
+
+    if (typeof backendId === 'number') {
+      try {
+        await deleteRemoteConversation(backendId);
+      } catch (error) {
+        console.error('[ChatPage] 删除后端会话失败，已中止本地删除:', error);
+        return;
+      }
+    }
 
     deleteLocalConv(convId);
 

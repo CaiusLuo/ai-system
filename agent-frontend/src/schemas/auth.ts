@@ -55,6 +55,8 @@ export const updateUserParamsSchema = z.object({
   username: usernameSchema.optional(),
   email: emailSchema.optional(),
   password: requiredPasswordSchema.optional(),
+  role: userRoleSchema.optional(),
+  status: userStatusTextSchema.optional(),
 });
 
 export const storedUserInfoSchema = z.object({

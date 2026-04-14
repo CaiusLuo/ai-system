@@ -6,6 +6,11 @@
 > 
 > **统一响应格式：** `{ code: 200, message: "操作成功", data: {} }`
 
+> **前端开发环境代理（Vite）说明：**
+> - 前端本地开发时通过 Vite proxy 直接转发到 `http://localhost:8080`
+> - 路由前缀与后端保持一致：`/agent`、`/auth`、`/user`、`/conversation`、`/api`
+> - ⚠️ 注意：只有 **Agent 对话相关接口** 使用 `/agent` 前缀；会话/用户/认证等接口分别使用各自的根路径（例如 `/conversation/list` 而不是 `/agent/conversation/list`）
+
 ---
 
 ## 目录
@@ -54,14 +59,14 @@ interface Result<T> {
 }
 
 // 注册响应
-Result<string>
+Result<null>
 ```
 
 ```json
 {
   "code": 200,
   "message": "注册成功",
-  "data": "注册成功"
+  "data": null
 }
 ```
 
@@ -127,8 +132,11 @@ interface CurrentUserResponse {
   userId: number;     // 用户 ID
   username: string;   // 用户名
   role: string;       // 用户角色
-  status: number;     // 状态（1=激活, 0=禁用）
-  statusText: string; // 状态文本
+  status?: number;     // 状态（1=激活, 0=禁用）
+  statusText?: 'ACTIVE' | 'DISABLED'; // 状态文本（后端实际返回值）
+  expiresAt: number;          // token 过期时间戳（具体单位取决于后端实现）
+  expiresInSeconds: number;   // token 剩余秒数
+  expired: boolean;           // token 是否已过期（当前接口固定返回 false）
 }
 
 Result<CurrentUserResponse>
@@ -143,7 +151,10 @@ Result<CurrentUserResponse>
     "username": "testuser",
     "role": "USER",
     "status": 1,
-    "statusText": "激活"
+    "statusText": "ACTIVE",
+    "expiresAt": 1770000000000,
+    "expiresInSeconds": 3600,
+    "expired": false
   }
 }
 ```
@@ -502,18 +513,25 @@ Result<MessageDTO[]>
 
 **响应：**
 ```typescript
-Result<string>   // "删除成功"
+Result<null>
 ```
 
 ```json
 {
   "code": 200,
-  "message": "操作成功",
-  "data": "删除成功"
+  "message": "删除成功",
+  "data": null
 }
 ```
 
 **说明：** 逻辑删除会话和关联消息（软删除）
+
+**错误码补充说明：**
+
+| code | 场景 | message |
+|------|------|---------|
+| 403 | 会话存在但不属于当前用户 | 无权访问该会话 |
+| 404 | 会话不存在，或已被逻辑删除（重复删除也会命中） | 会话不存在或已删除 |
 
 ---
 
@@ -955,7 +973,10 @@ interface UserCreateRequest {
 ```typescript
 // api/client.ts
 
-const BASE_URL = '/agent';
+// ⚠️ 注意：
+// - 只有 Agent 对话相关接口使用 /agent 前缀
+// - /auth /user /conversation /api 为后端根路径（由 Vite proxy 直接转发到 8080）
+const AGENT_BASE_URL = '/agent';
 
 class ApiClient {
   private getToken(): string | null {
@@ -1015,7 +1036,8 @@ class ApiClient {
       body: JSON.stringify(data),
     });
 
-    return this.handleResponse<string>(response);
+    // 后端返回：{ code:200, message:"注册成功", data:null }
+    return this.handleResponse<null>(response) as unknown as string;
   }
 
   async getCurrentUser(): Promise<CurrentUserResponse> {
@@ -1042,7 +1064,7 @@ class ApiClient {
   }
 
   async abortStream(messageId: string): Promise<boolean> {
-    const response = await fetch(`${BASE_URL}/chat/stream/abort`, {
+    const response = await fetch(`${AGENT_BASE_URL}/chat/stream/abort`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ messageId }),
@@ -1052,7 +1074,7 @@ class ApiClient {
   }
 
   async nonStreamChat(data: ChatRequest): Promise<ChatResponse> {
-    const response = await fetch(`${BASE_URL}/chat`, {
+    const response = await fetch(`${AGENT_BASE_URL}/chat`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(data),
@@ -1064,7 +1086,7 @@ class ApiClient {
   // ==================== 会话管理接口 ====================
 
   async getConversations(): Promise<ConversationDTO[]> {
-    const response = await fetch(`${BASE_URL}/conversation/list`, {
+    const response = await fetch(`/conversation/list`, {
       headers: this.getHeaders(),
     });
 
@@ -1073,7 +1095,7 @@ class ApiClient {
 
   async getMessages(conversationId: number): Promise<MessageDTO[]> {
     const response = await fetch(
-      `${BASE_URL}/conversation/${conversationId}/messages`,
+      `/conversation/${conversationId}/messages`,
       {
         headers: this.getHeaders(),
       }
@@ -1082,16 +1104,17 @@ class ApiClient {
     return this.handleResponse<MessageDTO[]>(response);
   }
 
-  async deleteConversation(conversationId: number): Promise<string> {
+  async deleteConversation(conversationId: number): Promise<null> {
     const response = await fetch(
-      `${BASE_URL}/conversation/${conversationId}`,
+      `/conversation/${conversationId}`,
       {
         method: 'DELETE',
         headers: this.getHeaders(),
       }
     );
 
-    return this.handleResponse<string>(response);
+    // 后端返回：{ code:200, message:"删除成功", data:null }
+    return this.handleResponse<null>(response);
   }
 
   // ==================== 用户接口 ====================

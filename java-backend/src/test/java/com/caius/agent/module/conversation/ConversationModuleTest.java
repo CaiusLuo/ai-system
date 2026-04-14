@@ -238,6 +238,7 @@ class ConversationModuleTest {
             conversationService.deleteConversation(1L, 1L);
 
             verify(conversationMapper, times(1)).deleteById(1L);
+            verify(messageMapper, times(1)).delete(any(LambdaQueryWrapper.class));
             verify(redisTemplate, times(1)).delete("user:1:conversation:messages:1");
         }
 
@@ -256,11 +257,30 @@ class ConversationModuleTest {
         @DisplayName("删除会话 - 会话不存在")
         void deleteConversation_NotFound() {
             when(conversationOwnershipService.requireOwnedConversation(999L, 1L))
-                    .thenThrow(new BusinessException(403, "无权访问该会话"));
+                    .thenThrow(new BusinessException(404, "会话不存在或已删除"));
 
             BusinessException exception = assertThrows(BusinessException.class,
                     () -> conversationService.deleteConversation(999L, 1L));
-            assertEquals("无权访问该会话", exception.getMessage());
+            assertEquals(404, exception.getCode());
+            assertEquals("会话不存在或已删除", exception.getMessage());
+        }
+
+        @Test
+        @DisplayName("删除会话 - 会话消息应按 wrapper 触发删除")
+        void deleteConversation_MessageDeleteWrapperShouldContainConversationId() {
+            Conversation conv = new Conversation();
+            conv.setId(1L);
+            conv.setUserId(1L);
+
+            when(conversationOwnershipService.requireOwnedConversation(1L, 1L)).thenReturn(conv);
+            when(conversationMapper.deleteById(1L)).thenReturn(1);
+            when(cacheKeyFactory.conversationMessages(1L, 1L)).thenReturn("user:1:conversation:messages:1");
+            when(redisTemplate.delete(anyString())).thenReturn(true);
+            when(messageMapper.delete(any(LambdaQueryWrapper.class))).thenReturn(1);
+
+            conversationService.deleteConversation(1L, 1L);
+
+            verify(messageMapper, times(1)).delete(any(LambdaQueryWrapper.class));
         }
     }
 }

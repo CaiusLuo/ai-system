@@ -14,6 +14,8 @@ import com.caius.agent.module.conversation.service.ConversationOwnershipService;
 import com.caius.agent.module.conversation.service.ConversationService;
 import com.caius.agent.module.user.entity.User;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -28,6 +30,7 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
+@Log4j2
 public class ConversationServiceImpl implements ConversationService {
 
     private final ConversationMapper conversationMapper;
@@ -76,6 +79,7 @@ public class ConversationServiceImpl implements ConversationService {
         List<Message> messages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
                         .eq(Message::getConversationId, conversationId)
+                        .eq(Message::getDeleted, 0)
                         .orderByAsc(Message::getCreatedAt)
         );
 
@@ -178,10 +182,15 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public void deleteConversation(Long conversationId, Long userId) {
+        log.info("deleteConversation: userId={}, conversationId={}", userId, conversationId);
         conversationOwnershipService.requireOwnedConversation(conversationId, userId);
 
         // 逻辑删除会话
         conversationMapper.deleteById(conversationId);
+        // 逻辑删除会话消息
+        messageMapper.delete(new LambdaQueryWrapper<Message>()
+                .eq(Message::getConversationId, conversationId)
+        );
 
         // 清除 Redis 缓存
         redisTemplate.delete(cacheKeyFactory.conversationMessages(userId, conversationId));

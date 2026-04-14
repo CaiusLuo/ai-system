@@ -85,7 +85,7 @@ const MessageBubble = memo(function MessageBubble({ message, isStreaming: _isStr
           /* ====== AI 消息（左对齐） ====== */
           <div className="flex gap-3">
             <AgentAvatar />
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 pr-1">
               {/* 思考过程（可折叠） */}
               {hasReasoning && (
                 <div className="mb-4">
@@ -127,7 +127,9 @@ const MessageBubble = memo(function MessageBubble({ message, isStreaming: _isStr
 
               {/* AI 消息正文 */}
               {displayContent ? (
-                <MarkdownRenderer content={displayContent} />
+                <div className="max-w-[46rem]">
+                  <MarkdownRenderer content={displayContent} />
+                </div>
               ) : null}
             </div>
           </div>
