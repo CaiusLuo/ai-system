@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type DragEvent } from 'react';
-import type { ConversationDTO, LocalConversationSummary } from '../types';
+import type { ConversationDTO, LocalConversationSummary, StoredCurrentUser } from '../types';
 import { SidebarBrandMotion } from '../remotion';
 
 interface SidebarProps {
@@ -17,7 +17,8 @@ interface SidebarProps {
   onNewConversation: () => void;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
-  username?: string;
+  currentUser?: StoredCurrentUser | null;
+  isAdminRoute?: boolean;
   showAdminEntry?: boolean;
   onOpenAdmin?: () => void;
   onLogout?: () => void;
@@ -39,7 +40,8 @@ export default function Sidebar({
   onNewConversation,
   isMobileOpen,
   onCloseMobile,
-  username,
+  currentUser,
+  isAdminRoute = false,
   showAdminEntry,
   onOpenAdmin,
   onLogout,
@@ -73,6 +75,14 @@ export default function Sidebar({
   }, []);
 
   const canDragReorder = isDesktop && typeof onReorderConversations === 'function';
+  const username = currentUser?.username || '用户';
+  const userRoleLabel = currentUser
+    ? currentUser.role === 'ADMIN'
+      ? '管理员'
+      : '普通用户'
+    : '账户';
+  const userStatusLabel = currentUser?.statusText || '已登录';
+  const userDisabled = currentUser?.status === 0 || currentUser?.statusText === '禁用';
 
   const handleDragStart = (e: DragEvent<HTMLDivElement>, id: string) => {
     if (!canDragReorder) {
@@ -218,7 +228,7 @@ export default function Sidebar({
               {localConversations.map((conv) => {
                 const isDragged = draggedId === conv.id;
                 const isDragOver = dragOverId === conv.id;
-                const isActive = currentLocalConvId === conv.id;
+                const isActive = !isAdminRoute && currentLocalConvId === conv.id;
 
                 return (
                   <div
@@ -288,7 +298,14 @@ export default function Sidebar({
           {showAdminEntry && (
             <button
               onClick={() => onOpenAdmin?.()}
-              className="flex min-h-[42px] w-full items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
+              className={`
+                flex min-h-[42px] w-full items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2 text-sm transition-colors
+                ${
+                  isAdminRoute
+                    ? 'bg-[var(--accent-050)] text-[var(--accent-700)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]'
+                }
+              `}
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -298,7 +315,12 @@ export default function Sidebar({
           )}
 
           <div className="flex items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2">
-            <p className="truncate text-sm text-[var(--text-secondary)]">{username || '用户'}</p>
+            <div className="min-w-0">
+              <p className="truncate text-sm text-[var(--text-secondary)]">{username}</p>
+              <p className={`truncate text-[11px] ${userDisabled ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
+                {userRoleLabel} · {userStatusLabel}
+              </p>
+            </div>
             {onLogout && (
               <button
                 onClick={onLogout}

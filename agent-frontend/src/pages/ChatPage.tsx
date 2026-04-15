@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect as useEffectHook, useMemo, useCallback, type CSSProperties } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useSSEChat } from '../hooks/useSSEChat';
 import { useLocalChatStorage, getStoredConversations } from '../hooks/useLocalChatStorage';
 import Sidebar from '../components/Sidebar';
@@ -8,7 +8,7 @@ import MessageSkeleton from '../components/MessageSkeleton';
 import ChatInput from '../components/ChatInput';
 import AdminPanel from './AdminPanel';
 import { useDynamicViewportHeight } from '../hooks/useDynamicViewportHeight';
-import { logout, getCurrentUser, getUserInfo, AUTH_PAGE_PATH } from '../services/auth';
+import { logout, getCurrentUser, getStoredCurrentUser, AUTH_PAGE_PATH } from '../services/auth';
 import {
   getConversationList,
   deleteConversation as deleteRemoteConversation,
@@ -18,6 +18,7 @@ import { CHAT_CONVERSATIONS_KEY } from '../services/chatStorage';
 import type {
   LocalConversationSummary,
   Message,
+  StoredCurrentUser,
   StoredConversationMap,
   StoredMessage,
 } from '../types';
@@ -134,10 +135,7 @@ export default function ChatPage() {
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [isSwitchingConversation, setIsSwitchingConversation] = useState(false);
   const [hasLoadedFromBackend, setHasLoadedFromBackend] = useState(false);
-  const [username, setUsername] = useState('');
-  const [userRole, setUserRole] = useState('');
-  const [userDisabled, setUserDisabled] = useState(false);
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [currentUser, setCurrentUser] = useState<StoredCurrentUser | null>(() => getStoredCurrentUser());
   const [agentName, setAgentName] = useState(() => {
     return localStorage.getItem('agent_name') || '工作台';
   });
@@ -145,11 +143,16 @@ export default function ChatPage() {
   const [tempAgentName, setTempAgentName] = useState('');
   const useLocalMode = true;
   const navigate = useNavigate();
+  const location = useLocation();
   const viewportHeight = useDynamicViewportHeight();
   const savedStreamingMessageRef = useRef<Set<string>>(new Set());
   
   // 智能滚动：用户手动滚动时不自动跟随
   const shouldAutoScrollRef = useRef(true);
+  const isAdminRoute = location.pathname.startsWith('/admin');
+  const username = currentUser?.username ?? '';
+  const userRole = currentUser?.role ?? '';
+  const userDisabled = currentUser?.status === 0 || currentUser?.statusText === '禁用';
 
   const mergeBackendConversationsToLocal = useCallback((remoteConversations: ConversationDTO[]) => {
     const storedConversations = getStoredConversations();
@@ -168,45 +171,26 @@ export default function ChatPage() {
     }
   }, [getLocalConvList]);
 
-  // 加载用户信息
   useEffectHook(() => {
-    const userInfo = getUserInfo();
-    if (userInfo) {
-      setUsername(userInfo.username);
-      setUserRole(userInfo.role);
-      setUserDisabled(userInfo.status === 'DISABLED');
-    }
-
-    if (window.location.hash === '#admin' && userInfo?.role === 'ADMIN') {
-      setShowAdminPanel(true);
-    }
+    setCurrentUser(getStoredCurrentUser());
   }, []);
 
   useEffectHook(() => {
-    const syncAdminPanelByHash = () => {
-      if (window.location.hash === '#admin' && userRole === 'ADMIN') {
-        setShowAdminPanel(true);
-      } else if (window.location.hash !== '#admin') {
-        setShowAdminPanel(false);
-      }
-    };
-
-    syncAdminPanelByHash();
-    window.addEventListener('hashchange', syncAdminPanelByHash);
-
-    return () => {
-      window.removeEventListener('hashchange', syncAdminPanelByHash);
-    };
-  }, [userRole]);
+    if (
+      userRole === 'ADMIN' &&
+      location.pathname === '/chat' &&
+      (window.location.hash === '#admin' || window.location.hash === '#/admin')
+    ) {
+      navigate('/admin/users', { replace: true });
+    }
+  }, [location.pathname, navigate, userRole]);
 
   useEffectHook(() => {
     const bootstrapFromBackend = async () => {
       try {
         const me = await getCurrentUser();
         if (me.code === 200 && me.data) {
-          setUsername(me.data.username);
-          setUserRole(me.data.role);
-          setUserDisabled(me.data.status === 0 || me.data.statusText === 'DISABLED');
+          setCurrentUser(me.data);
         }
       } catch (error) {
         console.warn('[ChatPage] 获取当前用户信息失败，继续使用本地缓存:', error);
@@ -368,6 +352,10 @@ export default function ChatPage() {
     } else {
       clearMessages();
     }
+
+    if (isAdminRoute) {
+      navigate('/chat');
+    }
     setIsMobileSidebarOpen(false);
   };
 
@@ -414,8 +402,11 @@ export default function ChatPage() {
       setIsSwitchingConversation(false);
     }
 
+    if (isAdminRoute) {
+      navigate('/chat');
+    }
     setIsMobileSidebarOpen(false);
-  }, [isLoading, switchConversation, loadConversation, resetChatState]);
+  }, [isAdminRoute, isLoading, loadConversation, navigate, resetChatState, switchConversation]);
 
   // 删除本地对话
   const handleDeleteConversation = async (id: number | string) => {
@@ -458,7 +449,7 @@ export default function ChatPage() {
     });
 
     try {
-      localStorage.setItem('chat_conversations', JSON.stringify(orderedConvs));
+      localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(orderedConvs));
       refreshLocalConvList();
     } catch (error) {
       console.error('[ChatPage] 保存对话排序失败:', error);
@@ -554,24 +545,13 @@ export default function ChatPage() {
   }, [displayMessages, currentStreamingMessage, isLoading]);
 
   const handleOpenAdmin = () => {
-    if (window.location.hash !== '#admin') {
-      history.replaceState({ adminPanel: true }, '', '#admin');
-    }
-    setShowAdminPanel(true);
+    navigate('/admin/users');
     setIsMobileSidebarOpen(false);
   };
 
   const handleCloseAdmin = () => {
-    if (window.location.hash === '#admin') {
-      history.replaceState({}, '', window.location.pathname);
-    }
-    setShowAdminPanel(false);
+    navigate('/chat');
   };
-
-  // 管理员面板
-  if (showAdminPanel) {
-    return <AdminPanel onBack={handleCloseAdmin} />;
-  }
 
   const hasMessages = displayMessages.length > 0;
   const currentConvId = currentLocalConvId ?? getCurrentConvId();
@@ -603,7 +583,8 @@ export default function ChatPage() {
         onNewConversation={handleNewConversation}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
-        username={username}
+        currentUser={currentUser}
+        isAdminRoute={isAdminRoute}
         showAdminEntry={showAdminEntry}
         onOpenAdmin={handleOpenAdmin}
         onLogout={handleLogout}
@@ -617,123 +598,135 @@ export default function ChatPage() {
 
       {/* 主聊天区域 */}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* 顶部导航栏 */}
-        <header className="relative shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(247,247,245,0.88)] backdrop-blur-sm">
-          <SoftGridMotion className="pointer-events-none absolute inset-0" opacity={0.18} />
-          <div
-            className="relative flex items-center justify-between gap-2 px-3 pb-2.5 pt-2 sm:px-4"
-            style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }}
-          >
-            <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-              {/* 移动端菜单按钮 */}
-              <button
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)] lg:hidden"
-                aria-label="打开会话列表"
+        {isAdminRoute ? (
+          <AdminPanel onBack={handleCloseAdmin} />
+        ) : (
+          <>
+            {/* 顶部导航栏 */}
+            <header className="relative shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(247,247,245,0.88)] backdrop-blur-sm">
+              <SoftGridMotion className="pointer-events-none absolute inset-0" opacity={0.18} />
+              <div
+                className="relative flex items-center justify-between gap-2 px-3 pb-2.5 pt-2 sm:px-4"
+                style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }}
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
+                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+                  {/* 移动端菜单按钮 */}
+                  <button
+                    onClick={() => setIsMobileSidebarOpen(true)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)] lg:hidden"
+                    aria-label="打开会话列表"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                  </button>
 
-              <div className="min-w-0">
-                <h1 className="truncate text-sm font-medium text-[var(--text-primary)] sm:max-w-xs">
-                  {currentTitle || '未命名会话'}
-                </h1>
-                {isLoading ? (
-                  <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                    <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-[var(--accent-500)]" />
-                    正在处理...
-                  </p>
-                ) : (
-                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                    {hasMessages ? '继续当前会话' : '创建第一条会话'}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* 个人资料入口（预留） */}
-            <button
-              onClick={handleOpenProfile}
-              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-transparent px-2.5 py-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
-              title="个人资料（即将上线）"
-              aria-label="查看个人资料"
-            >
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-soft)] text-xs font-medium text-[var(--text-secondary)]">
-                {(username || '用户').slice(0, 1).toUpperCase()}
-              </span>
-              <span className="hidden sm:inline">账户</span>
-            </button>
-          </div>
-        </header>
-
-        {/* 消息列表区域 */}
-        <div
-          ref={chatContainerRef}
-          className="scrollbar-thin flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[var(--app-canvas)]"
-        >
-          {isSwitchingConversation ? (
-            <div className="mx-auto max-w-4xl px-3 py-12 sm:px-4">
-              <MessageSkeleton count={3} />
-            </div>
-          ) : !hasMessages ? (
-            <div className="flex h-full items-center justify-center px-4">
-              <div className="relative w-full max-w-xl overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-6 py-10 text-center shadow-[var(--shadow-soft)] sm:px-10">
-                <div className="pointer-events-none absolute inset-0">
-                  <EmptyStateMotion className="absolute inset-0" opacity={0.5} />
-                </div>
-                <div className="relative">
-                  <h2 className="mb-3 text-[1.6rem] font-semibold tracking-tight text-[var(--text-primary)] sm:text-2xl">
-                    开始管理你的求职会话
-                  </h2>
-                  <p className="mb-1 text-sm text-[var(--text-secondary)]">
-                    先输入一个目标岗位或简历准备问题，逐步记录你的求职进度。
-                  </p>
-                  <p className="text-xs text-[var(--text-muted)]">例如：整理前端岗位投递优先级</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="pb-2 pt-1 sm:pb-4">
-              {displayMessages.map((msg, idx) => (
-                <MessageBubble
-                  key={idx}
-                  message={msg}
-                  isStreaming={idx === displayMessages.length - 1 && isLoading}
-                />
-              ))}
-
-              {isLoading && !currentStreamingMessage && (
-                <div className="mx-auto max-w-4xl px-3 py-5 sm:px-4 sm:py-6">
-                  <div className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 text-sm text-[var(--text-muted)]">
-                    <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--accent-500)]" />
-                    正在整理回复...
+                  <div className="min-w-0">
+                    <h1 className="truncate text-sm font-medium text-[var(--text-primary)] sm:max-w-xs">
+                      {currentTitle || '未命名会话'}
+                    </h1>
+                    {isLoading ? (
+                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                        <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-[var(--accent-500)]" />
+                        正在处理...
+                      </p>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                        {hasMessages ? '继续当前会话' : '创建第一条会话'}
+                      </p>
+                    )}
                   </div>
                 </div>
+
+                <button
+                  onClick={handleOpenProfile}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-transparent px-2.5 py-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
+                  title={currentUser ? `${currentUser.username} · ${currentUser.role}` : '个人资料（即将上线）'}
+                  aria-label="查看个人资料"
+                >
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-soft)] text-xs font-medium text-[var(--text-secondary)]">
+                    {(username || '用户').slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="hidden min-w-0 sm:flex sm:flex-col sm:items-start sm:leading-tight">
+                    <span className="max-w-32 truncate text-sm text-[var(--text-primary)]">
+                      {username || '用户'}
+                    </span>
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      {userRole === 'ADMIN' ? '管理员' : '普通用户'}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            </header>
+
+            {/* 消息列表区域 */}
+            <div
+              ref={chatContainerRef}
+              className="scrollbar-thin flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain bg-[var(--app-canvas)]"
+            >
+              {isSwitchingConversation ? (
+                <div className="mx-auto max-w-4xl px-3 py-12 sm:px-4">
+                  <MessageSkeleton count={3} />
+                </div>
+              ) : !hasMessages ? (
+                <div className="flex h-full items-center justify-center px-4">
+                  <div className="relative w-full max-w-xl overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-6 py-10 text-center shadow-[var(--shadow-soft)] sm:px-10">
+                    <div className="pointer-events-none absolute inset-0">
+                      <EmptyStateMotion className="absolute inset-0" opacity={0.5} />
+                    </div>
+                    <div className="relative">
+                      <h2 className="mb-3 text-[1.6rem] font-semibold tracking-tight text-[var(--text-primary)] sm:text-2xl">
+                        开始管理你的求职会话
+                      </h2>
+                      <p className="mb-1 text-sm text-[var(--text-secondary)]">
+                        先输入一个目标岗位或简历准备问题，逐步记录你的求职进度。
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)]">例如：整理前端岗位投递优先级</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="pb-2 pt-1 sm:pb-4">
+                  {displayMessages.map((msg, idx) => (
+                    <MessageBubble
+                      key={idx}
+                      message={msg}
+                      isStreaming={idx === displayMessages.length - 1 && isLoading}
+                    />
+                  ))}
+
+                  {isLoading && !currentStreamingMessage && (
+                    <div className="mx-auto max-w-4xl px-3 py-5 sm:px-4 sm:py-6">
+                      <div className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 text-sm text-[var(--text-muted)]">
+                        <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--accent-500)]" />
+                        正在整理回复...
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={messagesEndRef} />
+                </div>
               )}
-
-              <div ref={messagesEndRef} />
             </div>
-          )}
-        </div>
 
-        {/* 错误提示 */}
-        {error && (
-          <div className="mx-3 mb-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 sm:mx-4">
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
+            {/* 错误提示 */}
+            {error && (
+              <div className="mx-3 mb-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 sm:mx-4">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            )}
+
+            {/* 输入区域 */}
+            <ChatInput
+              onSend={handleSend}
+              isLoading={isLoading}
+              onStop={abortStream}
+              disabled={userDisabled}
+              placeholder={hasMessages ? '继续输入...' : '输入岗位、简历或投递相关问题...'}
+              autoFocus={!hasMessages}
+            />
+          </>
         )}
-
-        {/* 输入区域 */}
-        <ChatInput
-          onSend={handleSend}
-          isLoading={isLoading}
-          onStop={abortStream}
-          disabled={userDisabled}
-          placeholder={hasMessages ? '继续输入...' : '输入岗位、简历或投递相关问题...'}
-          autoFocus={!hasMessages}
-        />
       </main>
 
       {showAgentSettings && (

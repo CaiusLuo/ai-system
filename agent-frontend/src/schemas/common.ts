@@ -8,6 +8,7 @@ export const userRoleSchema = z.enum(['ADMIN', 'USER']);
 export const chatRoleSchema = z.enum(['user', 'assistant']);
 export const userStatusCodeSchema = z.union([z.literal(0), z.literal(1)]);
 export const userStatusTextSchema = z.enum(['ACTIVE', 'DISABLED']);
+export const userStatusDisplaySchema = z.enum(['激活', '禁用']);
 
 export const loginUsernameSchema = z.string().trim().min(1, '用户名不能为空');
 export const loginPasswordSchema = z

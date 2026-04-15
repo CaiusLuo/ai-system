@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import { getAuthStatus, getLoginRoute, AUTH_PAGE_PATH } from './services/auth'
 
@@ -43,13 +43,9 @@ function AppRoutes() {
 
   return (
     <Routes>
-      {/* 首页：已登录→聊天页面，未登录→落地页 */}
+      {/* 首页：已登录统一落到真实聊天路由，未登录显示落地页 */}
       <Route path="/" element={
-        loggedIn ? (
-          <ProtectedRoute>
-            <ChatPage />
-          </ProtectedRoute>
-        ) : authStatus === 'expired' || authStatus === 'invalid' ? (
+        loggedIn ? <Navigate to="/chat" replace /> : authStatus === 'expired' || authStatus === 'invalid' ? (
           <Navigate to={authRedirect} replace />
         ) : (
           <LandingPage />
@@ -68,6 +64,17 @@ function AppRoutes() {
           <ChatPage />
         </ProtectedRoute>
       } />
+
+      {/* 管理后台（需要管理员权限） */}
+      <Route path="/admin" element={
+        <ProtectedRoute requireAdmin>
+          <Outlet />
+        </ProtectedRoute>
+      }>
+        <Route index element={<Navigate to="users" replace />} />
+        <Route path="users" element={<ChatPage />} />
+        <Route path="*" element={<Navigate to="users" replace />} />
+      </Route>
 
       {/* 未知路由重定向到首页 */}
       <Route path="*" element={<Navigate to="/" replace />} />

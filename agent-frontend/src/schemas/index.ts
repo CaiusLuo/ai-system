@@ -5,6 +5,7 @@ import {
   loginParamsSchema,
   loginResponseSchema,
   registerParamsSchema,
+  storedCurrentUserSchema,
   storedUserInfoSchema,
   updateUserParamsSchema,
   userDtoSchema,
@@ -54,6 +55,7 @@ export type LoginResponse = z.infer<typeof loginResponseSchema>;
 export type CurrentUserResponse = z.infer<typeof currentUserResponseSchema>;
 export type UserDTO = z.infer<typeof userDtoSchema>;
 export type UpdateUserParams = z.infer<typeof updateUserParamsSchema>;
+export type StoredCurrentUser = z.infer<typeof storedCurrentUserSchema>;
 export type StoredUserInfo = z.infer<typeof storedUserInfoSchema>;
 export type JwtPayload = z.infer<typeof jwtPayloadSchema>;
 

@@ -7,6 +7,7 @@ import {
   requiredPasswordSchema,
   userRoleSchema,
   userStatusCodeSchema,
+  userStatusDisplaySchema,
   userStatusTextSchema,
   usernameSchema,
 } from './common';
@@ -39,7 +40,7 @@ export const currentUserResponseSchema = z.object({
   expiresInSeconds: z.number().optional(),
   expired: z.boolean().optional(),
   status: userStatusCodeSchema.optional(),
-  statusText: userStatusTextSchema.optional(),
+  statusText: userStatusDisplaySchema.optional(),
 });
 
 export const userDtoSchema = z.object({
@@ -48,7 +49,15 @@ export const userDtoSchema = z.object({
   email: z.string(),
   role: userRoleSchema,
   status: userStatusCodeSchema,
-  statusText: userStatusTextSchema,
+  statusText: userStatusDisplaySchema,
+});
+
+export const storedCurrentUserSchema = z.object({
+  userId: idSchema,
+  username: z.string(),
+  role: userRoleSchema,
+  status: userStatusCodeSchema.optional(),
+  statusText: userStatusDisplaySchema.optional(),
 });
 
 export const updateUserParamsSchema = z.object({

@@ -28,6 +28,7 @@ export type {
   SSEPingData,
   StoredConversation,
   StoredConversationMap,
+  StoredCurrentUser,
   StoredMessage,
   StoredUserInfo,
   StreamChatParams,

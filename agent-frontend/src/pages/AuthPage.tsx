@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { login, register } from '../services/auth';
+import { getCurrentUser, login, register } from '../services/auth';
 import Button from '../components/Button';
 import Input from '../components/Input';
 import { LoginAmbientMotion, SidebarBrandMotion } from '../remotion';
@@ -32,6 +32,12 @@ export default function AuthPage() {
       if (mode === 'login') {
         const response = await login({ username, password });
         if (response.code === 200) {
+          try {
+            await getCurrentUser();
+          } catch (syncError) {
+            console.warn('[AuthPage] 获取当前用户信息失败，进入聊天页后重试:', syncError);
+          }
+
           navigate('/chat');
         } else {
           setError(response.message || '登录失败');
