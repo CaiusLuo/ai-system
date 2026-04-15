@@ -34,7 +34,7 @@ permissions:
 
 concurrency:
   group: deploy-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -104,18 +104,17 @@ jobs:
 
       - name: Prepare deploy bundle
         run: |
-          mkdir -p deploy/release/java-backend deploy/release/agent-python deploy/release/agent-frontend/dist
+          mkdir -p deploy/release/java-backend
+          mkdir -p deploy/release/agent-python/agent
+          mkdir -p deploy/release/agent-frontend/dist
 
           cp "${{ steps.backend_jar.outputs.path }}" deploy/release/java-backend/java-backend.jar
 
+          cp agent-python/main.py deploy/release/agent-python/main.py
           rsync -a \
-            --exclude='.env' \
-            --exclude='.venv' \
+            --delete \
             --exclude='__pycache__' \
-            --exclude='.pytest_cache' \
-            --exclude='.ruff_cache' \
-            --exclude='.python-version' \
-            agent-python/ deploy/release/agent-python/
+            agent-python/agent/ deploy/release/agent-python/agent/
 
           rsync -a agent-frontend/dist/ deploy/release/agent-frontend/dist/
 
@@ -133,16 +132,41 @@ jobs:
         run: |
           tar -C deploy/release -czf "${DEPLOY_ARCHIVE}" .
 
+      - name: Inspect release archive
+        run: |
+          echo "Release bundle contents:"
+          find deploy/release -maxdepth 3 -type f | sort
+          echo
+          du -sh deploy/release
+          ls -lh "${DEPLOY_ARCHIVE}"
+
+      - name: Configure SSH for deploy
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "${SERVER_SSH_KEY}" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          ssh-keyscan -p "${SERVER_PORT}" -H "${SERVER_HOST}" >> "$HOME/.ssh/known_hosts"
+
       - name: Upload release archive to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
-          source: ${{ env.DEPLOY_ARCHIVE }}
-          target: /tmp
-          overwrite: true
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          scp \
+            -i "$HOME/.ssh/deploy_key" \
+            -P "${SERVER_PORT}" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            "${DEPLOY_ARCHIVE}" \
+            "${SERVER_USER}@${SERVER_HOST}:/tmp/${DEPLOY_ARCHIVE}"
 
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
