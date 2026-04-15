@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect as useEffectHook, useMemo, useCallback, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSSEChat } from '../hooks/useSSEChat';
-import { useLocalChatStorage, getStoredConversations } from '../hooks/useLocalChatStorage';
+import { useLocalChatStorage } from '../hooks/useLocalChatStorage';
 import Sidebar from '../components/Sidebar';
 import MessageBubble from '../components/MessageBubble';
 import MessageSkeleton from '../components/MessageSkeleton';
@@ -12,14 +12,11 @@ import { logout, getCurrentUser, getStoredCurrentUser, AUTH_PAGE_PATH } from '..
 import {
   getConversationList,
   deleteConversation as deleteRemoteConversation,
-  type ConversationDTO,
 } from '../services/conversation';
-import { CHAT_CONVERSATIONS_KEY } from '../services/chatStorage';
 import type {
   LocalConversationSummary,
   Message,
   StoredCurrentUser,
-  StoredConversationMap,
   StoredMessage,
 } from '../types';
 import { EmptyStateMotion, SoftGridMotion } from '../remotion';
@@ -33,71 +30,20 @@ function storedToMessage(msg: StoredMessage): Message {
   };
 }
 
-function normalizeLastMessageTime(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-  return Number.isNaN(Date.parse(value)) ? null : value;
-}
-
-function mergeBackendConversations(
-  storedConversations: StoredConversationMap,
-  remoteConversations: ConversationDTO[]
-): { nextConversations: StoredConversationMap; changed: boolean } {
-  const localKeyByBackendId = new Map<number, string>();
-
-  for (const [localKey, conversation] of Object.entries(storedConversations)) {
-    const backendId = conversation.backendId ?? conversation.id ?? undefined;
-    if (typeof backendId === 'number') {
-      localKeyByBackendId.set(backendId, localKey);
-    }
+function getMessageRenderKey(message: Message, index: number): string {
+  if (message.messageId) {
+    return `message-${message.messageId}`;
   }
 
-  const nextConversations: StoredConversationMap = { ...storedConversations };
-  let changed = false;
-  const now = Date.now();
-
-  for (const remoteConversation of remoteConversations) {
-    const backendId = remoteConversation.id;
-    const createdAt = Date.parse(remoteConversation.createdAt);
-    const updatedAt = Date.parse(remoteConversation.updatedAt);
-    const localKey = localKeyByBackendId.get(backendId) ?? `server_${backendId}`;
-    const existing = nextConversations[localKey];
-
-    if (existing) {
-      nextConversations[localKey] = {
-        ...existing,
-        id: backendId,
-        backendId,
-        title: remoteConversation.title || existing.title,
-        lastMessageContent: remoteConversation.lastMessageContent,
-        lastMessageTime: normalizeLastMessageTime(remoteConversation.lastMessageTime),
-        createdAt: Number.isFinite(existing.createdAt)
-          ? existing.createdAt
-          : Number.isFinite(createdAt)
-            ? createdAt
-            : now,
-        updatedAt: Number.isFinite(updatedAt)
-          ? updatedAt
-          : existing.updatedAt,
-      };
-      changed = true;
-    } else {
-      nextConversations[localKey] = {
-        id: backendId,
-        backendId,
-        title: remoteConversation.title || '新对话',
-        messages: [],
-        lastMessageContent: remoteConversation.lastMessageContent,
-        lastMessageTime: normalizeLastMessageTime(remoteConversation.lastMessageTime),
-        createdAt: Number.isFinite(createdAt) ? createdAt : now,
-        updatedAt: Number.isFinite(updatedAt) ? updatedAt : now,
-      };
-      changed = true;
-    }
+  if (message.id) {
+    return `message-${message.id}`;
   }
 
-  return { nextConversations, changed };
+  if (message.createdAt) {
+    return `message-${message.role}-${message.createdAt}`;
+  }
+
+  return `message-${message.role}-${index}-${message.content.slice(0, 32)}`;
 }
 
 export default function ChatPage() {
@@ -117,21 +63,24 @@ export default function ChatPage() {
 
   const {
     getCurrentConvId,
-    getCurrentConversation,
+    getConversationById,
     getConversationList: getLocalConvList,
     createConversation,
     addMessage,
     deleteConversation: deleteLocalConv,
     switchConversation,
     syncBackendId,
+    mergeRemoteConversations,
+    reorderConversations,
     clearAll,
   } = useLocalChatStorage();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const optimisticConversationIdRef = useRef<string | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [localConversations, setLocalConversations] = useState<LocalConversationSummary[]>([]);
-  const [currentLocalConvId, setCurrentLocalConvId] = useState<string | null>(null);
+  const [currentLocalConvId, setCurrentLocalConvId] = useState<string | null>(() => getCurrentConvId());
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [isSwitchingConversation, setIsSwitchingConversation] = useState(false);
   const [hasLoadedFromBackend, setHasLoadedFromBackend] = useState(false);
@@ -150,30 +99,30 @@ export default function ChatPage() {
   // 智能滚动：用户手动滚动时不自动跟随
   const shouldAutoScrollRef = useRef(true);
   const isAdminRoute = location.pathname.startsWith('/admin');
-  const username = currentUser?.username ?? '';
+  const profileUser =
+    currentUser?.status !== undefined && currentUser?.statusText !== undefined
+      ? currentUser
+      : null;
+  const username = profileUser?.username ?? '';
   const userRole = currentUser?.role ?? '';
-  const userDisabled = currentUser?.status === 0 || currentUser?.statusText === '禁用';
+  const userRoleLabel = profileUser
+    ? profileUser.role === 'ADMIN'
+      ? '管理员'
+      : '普通用户'
+    : '用户资料同步中';
+  const userDisabled = profileUser?.status === 0 || profileUser?.statusText === 'DISABLED';
 
-  const mergeBackendConversationsToLocal = useCallback((remoteConversations: ConversationDTO[]) => {
-    const storedConversations = getStoredConversations();
-    const { nextConversations, changed } = mergeBackendConversations(
-      storedConversations,
-      remoteConversations
-    );
-
-    if (changed) {
-      try {
-        localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(nextConversations));
-      } catch (storageError) {
-        console.warn('[ChatPage] 写入本地会话缓存失败:', storageError);
-      }
-      setLocalConversations(getLocalConvList());
-    }
+  const refreshLocalConvList = useCallback(() => {
+    setLocalConversations(getLocalConvList());
   }, [getLocalConvList]);
 
-  useEffectHook(() => {
-    setCurrentUser(getStoredCurrentUser());
-  }, []);
+  const syncLocalConversationState = useCallback((targetConvId?: string | null) => {
+    const resolvedConvId = targetConvId === undefined ? getCurrentConvId() : targetConvId;
+    const conversation = resolvedConvId ? getConversationById(resolvedConvId) : null;
+
+    setCurrentLocalConvId(resolvedConvId);
+    setLocalMessages(conversation ? conversation.messages.map(storedToMessage) : []);
+  }, [getConversationById, getCurrentConvId]);
 
   useEffectHook(() => {
     if (
@@ -186,10 +135,17 @@ export default function ChatPage() {
   }, [location.pathname, navigate, userRole]);
 
   useEffectHook(() => {
+    refreshLocalConvList();
+    syncLocalConversationState();
+  }, [refreshLocalConvList, syncLocalConversationState]);
+
+  useEffectHook(() => {
+    let cancelled = false;
+
     const bootstrapFromBackend = async () => {
       try {
         const me = await getCurrentUser();
-        if (me.code === 200 && me.data) {
+        if (!cancelled && me.code === 200 && me.data) {
           setCurrentUser(me.data);
         }
       } catch (error) {
@@ -198,8 +154,12 @@ export default function ChatPage() {
 
       try {
         const response = await getConversationList();
-        if (response.code === 200 && response.data) {
-          mergeBackendConversationsToLocal(response.data);
+        if (!cancelled && response.code === 200 && response.data) {
+          const changed = mergeRemoteConversations(response.data);
+          if (changed) {
+            refreshLocalConvList();
+            syncLocalConversationState();
+          }
         }
       } catch (error) {
         console.warn('[ChatPage] 获取后端会话列表失败，继续使用本地缓存:', error);
@@ -207,7 +167,10 @@ export default function ChatPage() {
     };
 
     void bootstrapFromBackend();
-  }, [mergeBackendConversationsToLocal]);
+    return () => {
+      cancelled = true;
+    };
+  }, [mergeRemoteConversations, refreshLocalConvList, syncLocalConversationState]);
 
   // 移动端侧边栏打开时，锁定 body 滚动，避免背景穿透
   useEffectHook(() => {
@@ -236,37 +199,29 @@ export default function ChatPage() {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
-  // 加载本地对话列表
-  const refreshLocalConvList = useCallback(() => {
-    const list = getLocalConvList();
-    setLocalConversations(list);
-  }, [getLocalConvList]);
-
-  useEffectHook(() => {
-    refreshLocalConvList();
-  }, [refreshLocalConvList]);
-
   // 加载当前本地对话的消息
   useEffectHook(() => {
-    const conv = getCurrentConversation();
-    if (conv) {
-      setCurrentLocalConvId(getCurrentConvId());
-      setLocalMessages(conv.messages.map(storedToMessage));
-
-      const backendId = conv.backendId || conv.id;
-      if (backendId && !hasLoadedFromBackend) {
-        setHasLoadedFromBackend(true);
-        loadConversation(Number(backendId)).then(() => {
-          // loadConversation 会更新 remoteMessages
-        }).catch(error => {
-          console.warn('[ChatPage] 从后端加载消息失败，使用本地缓存:', error);
-        });
-      }
-    } else {
-      setCurrentLocalConvId(getCurrentConvId());
+    if (!currentLocalConvId) {
       setLocalMessages([]);
+      return;
     }
-  }, [getCurrentConvId, getCurrentConversation]);
+
+    const conversation = getConversationById(currentLocalConvId);
+    if (!conversation) {
+      setLocalMessages([]);
+      return;
+    }
+
+    setLocalMessages(conversation.messages.map(storedToMessage));
+
+    const backendId = conversation.backendId ?? conversation.id;
+    if (backendId && !hasLoadedFromBackend) {
+      setHasLoadedFromBackend(true);
+      loadConversation(Number(backendId)).catch((error) => {
+        console.warn('[ChatPage] 从后端加载消息失败，使用本地缓存:', error);
+      });
+    }
+  }, [currentLocalConvId, getConversationById, hasLoadedFromBackend, loadConversation]);
 
   // 当 remoteMessages 更新时，同步到 localMessages（流式传输中不覆盖，避免丢失流式内容）
   useEffectHook(() => {
@@ -319,18 +274,35 @@ export default function ChatPage() {
       return;
     }
 
-    if (useLocalMode) {
-      const userMsg: Message = { role: 'user', content: message };
-      setLocalMessages(prev => [...prev, userMsg]);
-      addMessage({ role: 'user', content: message });
+    let activeLocalConvId = currentLocalConvId ?? getCurrentConvId();
+    const userMessage: Message = { role: 'user', content: message };
 
-      if (!getCurrentConvId()) {
-        createConversation(message);
+    if (useLocalMode) {
+      if (activeLocalConvId) {
+        addMessage({ role: 'user', content: message }, activeLocalConvId);
+        setLocalMessages((prev) => [...prev, userMessage]);
+      } else {
+        activeLocalConvId = createConversation({
+          title: message,
+          initialMessage: { role: 'user', content: message },
+        });
+        optimisticConversationIdRef.current = activeLocalConvId;
+        setCurrentLocalConvId(activeLocalConvId);
+        setLocalMessages([userMessage]);
       }
+
+      refreshLocalConvList();
     }
 
-    sendMessage(message, remoteConvId || undefined);
-    
+    const activeConversation = activeLocalConvId ? getConversationById(activeLocalConvId) : null;
+    const effectiveRemoteConversationId =
+      remoteConvId ??
+      activeConversation?.backendId ??
+      activeConversation?.id ??
+      undefined;
+
+    sendMessage(message, effectiveRemoteConversationId);
+
     // 发送消息后恢复自动滚动
     shouldAutoScrollRef.current = true;
   };
@@ -344,7 +316,9 @@ export default function ChatPage() {
     }
 
     if (useLocalMode) {
-      createConversation();
+      const nextConversationId = createConversation();
+      optimisticConversationIdRef.current = nextConversationId;
+      setCurrentLocalConvId(nextConversationId);
       setLocalMessages([]);
       setHasLoadedFromBackend(false);
       resetChatState();
@@ -360,21 +334,22 @@ export default function ChatPage() {
   };
 
   // 选择本地对话
-  const handleSelectConversation = useCallback(async (id: number | string) => {
+  const handleSelectConversation = useCallback((id: number | string) => {
     if (isLoading) return;
 
     setIsSwitchingConversation(true);
     setHasLoadedFromBackend(false);
+    optimisticConversationIdRef.current = null;
 
     // 清理旧的流状态和 SSE 连接
     resetChatState();
 
     try {
-      switchConversation(id as string);
-
       const convId = id as string;
-      const convs = getStoredConversations();
-      const conv = convs[convId];
+      switchConversation(convId);
+      setCurrentLocalConvId(convId);
+
+      const conv = getConversationById(convId);
 
       if (conv) {
         const msgs: Message[] = conv.messages.map(msg => ({
@@ -383,21 +358,9 @@ export default function ChatPage() {
           reasoning: msg.reasoning,
         }));
         setLocalMessages(msgs);
-
-        const backendId = conv.backendId || conv.id;
-        if (backendId) {
-          try {
-            await loadConversation(Number(backendId));
-            setHasLoadedFromBackend(true);
-          } catch (error) {
-            console.warn('[ChatPage] 从后端加载消息失败，使用本地缓存:', error);
-          }
-        }
       } else {
         setLocalMessages([]);
       }
-
-      setCurrentLocalConvId(convId);
     } finally {
       setIsSwitchingConversation(false);
     }
@@ -406,7 +369,14 @@ export default function ChatPage() {
       navigate('/chat');
     }
     setIsMobileSidebarOpen(false);
-  }, [isAdminRoute, isLoading, loadConversation, navigate, resetChatState, switchConversation]);
+  }, [
+    getConversationById,
+    isAdminRoute,
+    isLoading,
+    navigate,
+    resetChatState,
+    switchConversation,
+  ]);
 
   // 删除本地对话
   const handleDeleteConversation = async (id: number | string) => {
@@ -414,9 +384,7 @@ export default function ChatPage() {
 
     const convId = id as string;
     const isCurrentConv = getCurrentConvId() === convId;
-
-    const conversations = getStoredConversations();
-    const conversation = conversations[convId];
+    const conversation = getConversationById(convId);
     const backendId = conversation?.backendId ?? conversation?.id;
 
     if (typeof backendId === 'number') {
@@ -429,10 +397,14 @@ export default function ChatPage() {
     }
 
     deleteLocalConv(convId);
+    if (optimisticConversationIdRef.current === convId) {
+      optimisticConversationIdRef.current = null;
+    }
 
     if (isCurrentConv) {
       setLocalMessages([]);
       setCurrentLocalConvId(null);
+      setHasLoadedFromBackend(false);
     }
 
     refreshLocalConvList();
@@ -440,28 +412,49 @@ export default function ChatPage() {
 
   // 拖拽排序对话
   const handleReorderConversations = useCallback((orderedIds: string[]) => {
-    const convs = getStoredConversations();
-    const orderedConvs: StoredConversationMap = {};
-    orderedIds.forEach(id => {
-      if (convs[id]) {
-        orderedConvs[id] = convs[id];
-      }
-    });
-
-    try {
-      localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(orderedConvs));
-      refreshLocalConvList();
-    } catch (error) {
-      console.error('[ChatPage] 保存对话排序失败:', error);
-    }
-  }, [refreshLocalConvList]);
+    reorderConversations(orderedIds);
+    refreshLocalConvList();
+  }, [refreshLocalConvList, reorderConversations]);
 
   // 同步后端 ID
   useEffectHook(() => {
-    if (remoteConvId && currentLocalConvId) {
-      syncBackendId(currentLocalConvId, remoteConvId);
+    if (!remoteConvId) {
+      return;
     }
-  }, [remoteConvId, currentLocalConvId, syncBackendId]);
+
+    const targetLocalConvId =
+      optimisticConversationIdRef.current ??
+      currentLocalConvId ??
+      getCurrentConvId();
+
+    if (!targetLocalConvId) {
+      return;
+    }
+
+    const activeConversation = getConversationById(targetLocalConvId);
+    const currentBackendId = activeConversation?.backendId ?? activeConversation?.id;
+
+    if (currentBackendId === remoteConvId) {
+      optimisticConversationIdRef.current = null;
+      return;
+    }
+
+    const syncedConversationId = syncBackendId(targetLocalConvId, remoteConvId);
+    if (!syncedConversationId) {
+      return;
+    }
+
+    optimisticConversationIdRef.current = null;
+    setCurrentLocalConvId(syncedConversationId);
+    refreshLocalConvList();
+  }, [
+    currentLocalConvId,
+    getConversationById,
+    getCurrentConvId,
+    refreshLocalConvList,
+    remoteConvId,
+    syncBackendId,
+  ]);
 
   const handleLogout = async () => {
     if (isLoading) {
@@ -469,12 +462,14 @@ export default function ChatPage() {
     }
 
     savedStreamingMessageRef.current.clear();
+    optimisticConversationIdRef.current = null;
     clearAll();
     resetChatState();
     setLocalMessages([]);
     setLocalConversations([]);
     setCurrentLocalConvId(null);
     setHasLoadedFromBackend(false);
+    setCurrentUser(null);
 
     logout();
     navigate(AUTH_PAGE_PATH, { replace: true });
@@ -554,7 +549,7 @@ export default function ChatPage() {
   };
 
   const hasMessages = displayMessages.length > 0;
-  const currentConvId = currentLocalConvId ?? getCurrentConvId();
+  const currentConvId = currentLocalConvId;
   const currentTitle = currentConvId
     ? localConversations.find(c => c.id === currentConvId)?.title
     : null;
@@ -583,7 +578,7 @@ export default function ChatPage() {
         onNewConversation={handleNewConversation}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
-        currentUser={currentUser}
+        currentUser={profileUser}
         isAdminRoute={isAdminRoute}
         showAdminEntry={showAdminEntry}
         onOpenAdmin={handleOpenAdmin}
@@ -641,18 +636,18 @@ export default function ChatPage() {
                 <button
                   onClick={handleOpenProfile}
                   className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-transparent px-2.5 py-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
-                  title={currentUser ? `${currentUser.username} · ${currentUser.role}` : '个人资料（即将上线）'}
+                  title={profileUser ? `${profileUser.username} · ${profileUser.role}` : '等待后端用户信息'}
                   aria-label="查看个人资料"
                 >
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-soft)] text-xs font-medium text-[var(--text-secondary)]">
-                    {(username || '用户').slice(0, 1).toUpperCase()}
+                    {profileUser ? profileUser.username.slice(0, 1).toUpperCase() : '?'}
                   </span>
                   <span className="hidden min-w-0 sm:flex sm:flex-col sm:items-start sm:leading-tight">
                     <span className="max-w-32 truncate text-sm text-[var(--text-primary)]">
-                      {username || '用户'}
+                      {profileUser ? username : '未加载用户'}
                     </span>
                     <span className="text-[11px] text-[var(--text-muted)]">
-                      {userRole === 'ADMIN' ? '管理员' : '普通用户'}
+                      {userRoleLabel}
                     </span>
                   </span>
                 </button>
@@ -689,7 +684,7 @@ export default function ChatPage() {
                 <div className="pb-2 pt-1 sm:pb-4">
                   {displayMessages.map((msg, idx) => (
                     <MessageBubble
-                      key={idx}
+                      key={getMessageRenderKey(msg, idx)}
                       message={msg}
                       isStreaming={idx === displayMessages.length - 1 && isLoading}
                     />

@@ -15,6 +15,7 @@ export const storedMessageSchema = z.object({
 export const storedConversationSchema = z.object({
   id: idSchema.nullable(),
   backendId: idSchema.optional(),
+  tempId: z.string().optional(),
   title: z.string(),
   messages: z.array(storedMessageSchema),
   lastMessageContent: z.string().nullable(),
@@ -32,6 +33,7 @@ export const localConversationSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
   backendId: idSchema.nullable(),
+  tempId: z.string().optional(),
   updatedAt: localTimestampSchema,
   lastMessageContent: z.string().nullable(),
   lastMessageTime: z.string().nullable(),

@@ -12,6 +12,8 @@ import {
   usernameSchema,
 } from './common';
 
+const userStatusResponseSchema = z.union([userStatusTextSchema, userStatusDisplaySchema]);
+
 export const loginParamsSchema = z.object({
   username: loginUsernameSchema,
   password: loginPasswordSchema,
@@ -40,7 +42,7 @@ export const currentUserResponseSchema = z.object({
   expiresInSeconds: z.number().optional(),
   expired: z.boolean().optional(),
   status: userStatusCodeSchema.optional(),
-  statusText: userStatusDisplaySchema.optional(),
+  statusText: userStatusResponseSchema.optional(),
 });
 
 export const userDtoSchema = z.object({
@@ -49,7 +51,7 @@ export const userDtoSchema = z.object({
   email: z.string(),
   role: userRoleSchema,
   status: userStatusCodeSchema,
-  statusText: userStatusDisplaySchema,
+  statusText: userStatusResponseSchema,
 });
 
 export const storedCurrentUserSchema = z.object({
@@ -57,7 +59,7 @@ export const storedCurrentUserSchema = z.object({
   username: z.string(),
   role: userRoleSchema,
   status: userStatusCodeSchema.optional(),
-  statusText: userStatusDisplaySchema.optional(),
+  statusText: userStatusResponseSchema.optional(),
 });
 
 export const updateUserParamsSchema = z.object({

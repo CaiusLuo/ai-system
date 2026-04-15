@@ -2,7 +2,8 @@
 
 > **后端端口：** `8080`
 > 
-> **代理前缀：** `/agent`（通过 Vite 代理转发到 `http://localhost:8080`）
+> **前端开发代理前缀：** `/agent`、`/auth`、`/user`、`/conversation`、`/api`
+> （通过 Vite 代理转发到 `http://localhost:8080`）
 > 
 > **前端对接文档：** [docs/frontend-api.md](docs/frontend-api.md) - 包含 TypeScript 类型定义和完整示例
 > 
@@ -115,7 +116,9 @@
     "token": "eyJhbGciOiJIUzI1NiJ9...",
     "userId": 1,
     "username": "testuser",
-    "role": "USER"
+    "role": "USER",
+    "expiresAt": 1770000000000,
+    "expiresInSeconds": 3600
   }
 }
 ```
@@ -126,6 +129,8 @@
 | userId | number | 用户 ID |
 | username | string | 用户名 |
 | role | string | 用户角色（USER/ADMIN） |
+| expiresAt | number | Token 过期时间戳（毫秒） |
+| expiresInSeconds | number | Token 剩余秒数 |
 
 ---
 
@@ -148,10 +153,24 @@ Authorization: Bearer <TOKEN>
     "username": "testuser",
     "role": "USER",
     "status": 1,
-    "statusText": "激活"
+    "statusText": "ACTIVE",
+    "expiresAt": 1770000000000,
+    "expiresInSeconds": 3600,
+    "expired": false
   }
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| userId | number | 用户 ID |
+| username | string | 用户名 |
+| role | string | 用户角色（USER/ADMIN） |
+| status | number | 状态（1=激活, 0=禁用） |
+| statusText | string | 状态文本（`ACTIVE` / `DISABLED`） |
+| expiresAt | number | Token 过期时间戳（毫秒） |
+| expiresInSeconds | number | Token 剩余秒数 |
+| expired | boolean | 当前 token 是否已过期 |
 
 ---
 
@@ -216,7 +235,7 @@ interface SSEChunkData {
 | `message_id` | `{ messageId: "UUID" }` | ⭐ **消息ID（首个事件，Java 端发送）** | **立即保存，用于 abort** |
 | `start`  | `{ type, messageId, requestId, userId, conversationId, timestamp }` | v2 新增：Python 确认流式开始 | 日志记录 |
 | `chunk` | `{ type, messageId, content, index, reasoning? }` | AI 回复片段 | 打字机输出 |
-| `done`  | `{ type, messageId, info, contentLength, chunkCount, timestamp }` | 完成 | 完整性校验 |
+| `done`  | `{ type, messageId, requestId, userId, conversationId, info, contentLength, chunkCount, timestamp }` | 完成 | 完整性校验 |
 | `error` | `{ type, messageId, message, errorCode }` | 错误 | 区分 ABORTED（正常）vs STREAM_ERROR（异常） |
 | `ping`  | `{ type }` | 心跳（30s） | 忽略 |
 
@@ -234,7 +253,7 @@ data: {"type":"chunk","messageId":"550e8400-e29b-41d4-a716-446655440000","reques
 
 event: chunk
 id: chunk-550e8400-e29b-41d4-a716-446655440000
-data: {"type":"chunk","messageId":"550e8400-e29b-41d4-a716-446655440000","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"content","好","index":1}
+data: {"type":"chunk","messageId":"550e8400-e29b-41d4-a716-446655440000","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"content":"好","index":1}
 
 event: done
 id: done-550e8400-e29b-41d4-a716-446655440000
@@ -301,7 +320,7 @@ data: {"type":"done","messageId":"550e8400-e29b-41d4-a716-446655440000","request
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| messageId | string | ✅ | 消息 ID（UUID，从 done 事件中获取） |
+| messageId | string | ✅ | 消息 ID（UUID，SSE 首个 `message_id` 事件返回；`done` 事件也会回传用于确认） |
 
 **响应：**
 ```json
@@ -512,8 +531,8 @@ async function abortGeneration() {
 ```json
 {
   "code": 200,
-  "message": "操作成功",
-  "data": "删除成功"
+  "message": "删除成功",
+  "data": null
 }
 ```
 
@@ -543,7 +562,7 @@ async function abortGeneration() {
     "email": "test@example.com",
     "role": "USER",
     "status": 1,
-    "statusText": "激活"
+    "statusText": "ACTIVE"
   }
 }
 ```
@@ -557,7 +576,7 @@ async function abortGeneration() {
 | email | string | 邮箱地址 |
 | role | string | 用户角色（USER/ADMIN） |
 | status | number | 状态（1=激活, 0=禁用） |
-| statusText | string | 状态文本（"激活"/"禁用"） |
+| statusText | string | 状态文本（`ACTIVE` / `DISABLED`） |
 
 ---
 
@@ -827,7 +846,7 @@ python-agent:
 
 ### Abort 机制
 
-1. **messageId 获取**：后端在 `done` 事件中返回
+1. **messageId 获取**：后端在首个 `message_id` 事件中返回，`done` 事件也会回传用于确认
 2. **自动清理**：任务完成/中断/超时后自动清理 abortMap
 3. **线程安全**：`ConcurrentHashMap` + `AtomicBoolean`
 

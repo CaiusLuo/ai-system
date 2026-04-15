@@ -339,6 +339,12 @@ export function dispatchSSEEvent(
         handlers.onMessageId?.(eventData.messageId);
       }
       return false;
+    case 'start':
+      handlers.onConversationId?.(eventData.conversationId);
+      if (eventData.messageId) {
+        handlers.onMessageId?.(eventData.messageId);
+      }
+      return false;
     case 'chunk': {
       const reasoningContent = eventData.reasoning || eventData.info;
       if (reasoningContent) {

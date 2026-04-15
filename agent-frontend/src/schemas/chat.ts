@@ -38,8 +38,20 @@ export const sseMessageIdDataSchema = z.object({
   messageId: z.string().min(1),
 });
 
+export const sseStartDataSchema = z.object({
+  type: z.literal('start'),
+  messageId: z.string().min(1),
+  requestId: z.string().min(1),
+  userId: idSchema,
+  conversationId: idSchema,
+  timestamp: z.number().optional(),
+});
+
 export const sseChunkDataSchema = z.object({
   type: z.literal('chunk'),
+  messageId: z.string().min(1).optional(),
+  requestId: z.string().min(1).optional(),
+  userId: idSchema.optional(),
   content: z.string(),
   index: z.number().int().nonnegative(),
   reasoning: z.string().optional(),
@@ -52,11 +64,21 @@ export const sseDoneDataSchema = z.object({
   info: z.string(),
   conversationId: idSchema,
   messageId: z.string().min(1),
+  requestId: z.string().min(1).optional(),
+  userId: idSchema.optional(),
+  contentLength: z.number().int().nonnegative().optional(),
+  chunkCount: z.number().int().nonnegative().optional(),
+  timestamp: z.number().optional(),
 });
 
 export const sseErrorDataSchema = z.object({
   type: z.literal('error'),
   message: z.string(),
+  messageId: z.string().min(1).optional(),
+  requestId: z.string().min(1).optional(),
+  userId: idSchema.optional(),
+  errorCode: z.string().optional(),
+  timestamp: z.number().optional(),
 });
 
 export const ssePingDataSchema = z.object({
@@ -65,6 +87,7 @@ export const ssePingDataSchema = z.object({
 
 export const sseEventDataSchema = z.discriminatedUnion('type', [
   sseMessageIdDataSchema,
+  sseStartDataSchema,
   sseChunkDataSchema,
   sseDoneDataSchema,
   sseErrorDataSchema,

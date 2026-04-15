@@ -43,11 +43,8 @@ export function getToken(): string | null {
 
 export function removeToken(): void {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_ID_KEY);
-  localStorage.removeItem(USERNAME_KEY);
-  localStorage.removeItem(USER_ROLE_KEY);
-  localStorage.removeItem(USER_STATUS_KEY);
-  localStorage.removeItem(CURRENT_USER_KEY);
+  clearLegacyUserInfo();
+  clearStoredCurrentUser();
   clearPersistedChatState();
 }
 
@@ -139,7 +136,6 @@ export function redirectToLogin(
 
 export function setUserInfo(info: StoredUserInfo): void {
   const userInfo = storedUserInfoSchema.parse(info);
-  persistLegacyUserInfo(userInfo);
   setStoredCurrentUser({
     userId: userInfo.userId,
     username: userInfo.username,
@@ -147,7 +143,7 @@ export function setUserInfo(info: StoredUserInfo): void {
     ...(userInfo.status
       ? {
           status: userInfo.status === 'ACTIVE' ? 1 : 0,
-          statusText: userInfo.status === 'ACTIVE' ? '激活' : '禁用',
+          statusText: userInfo.status,
         }
       : {}),
   });
@@ -155,32 +151,15 @@ export function setUserInfo(info: StoredUserInfo): void {
 
 export function getUserInfo(): StoredUserInfo | null {
   const currentUser = getStoredCurrentUser();
-  if (currentUser) {
-    const normalizedStatus = normalizeUserStatus(currentUser.status, currentUser.statusText);
-    const parsed = storedUserInfoSchema.safeParse({
-      userId: currentUser.userId,
-      username: currentUser.username,
-      role: currentUser.role,
-      status: normalizedStatus,
-    });
-
-    return parsed.success ? parsed.data : null;
-  }
-
-  const userId = localStorage.getItem(USER_ID_KEY);
-  const username = localStorage.getItem(USERNAME_KEY);
-  const role = localStorage.getItem(USER_ROLE_KEY);
-  const status = localStorage.getItem(USER_STATUS_KEY);
-
-  if (!userId || !username || !role) {
+  if (!currentUser) {
     return null;
   }
 
   const parsed = storedUserInfoSchema.safeParse({
-    userId: Number(userId),
-    username,
-    role,
-    status: status || undefined,
+    userId: currentUser.userId,
+    username: currentUser.username,
+    role: currentUser.role,
+    status: normalizeUserStatus(currentUser.status, currentUser.statusText),
   });
 
   return parsed.success ? parsed.data : null;
@@ -211,7 +190,7 @@ export function getStoredCurrentUser(): StoredCurrentUser | null {
     ...(legacyUser.status
       ? {
           status: legacyUser.status === 'ACTIVE' ? 1 : 0,
-          statusText: legacyUser.status === 'ACTIVE' ? '激活' : '禁用',
+          statusText: legacyUser.status,
         }
       : {}),
   });
@@ -221,6 +200,7 @@ export function getStoredCurrentUser(): StoredCurrentUser | null {
   }
 
   setStoredCurrentUser(migrated.data);
+  clearLegacyUserInfo();
   return migrated.data;
 }
 
@@ -229,11 +209,14 @@ export function isLoggedIn(): boolean {
 }
 
 export function isAdmin(): boolean {
-  return getUserInfo()?.role === 'ADMIN';
+  return getStoredCurrentUser()?.role === 'ADMIN';
 }
 
 export function isUserDisabled(): boolean {
-  return getUserInfo()?.status === 'DISABLED';
+  return normalizeUserStatus(
+    getStoredCurrentUser()?.status,
+    getStoredCurrentUser()?.statusText
+  ) === 'DISABLED';
 }
 
 function normalizeUserStatus(
@@ -279,12 +262,16 @@ export async function login(
       localStorage.removeItem('agent_name');
     }
 
+    clearStoredCurrentUser();
+    clearLegacyUserInfo();
     setToken(result.data.token);
-    setUserInfo({
-      userId: result.data.userId,
-      username: result.data.username,
-      role: result.data.role,
-    });
+
+    try {
+      await getCurrentUser();
+    } catch (error) {
+      removeToken();
+      throw error;
+    }
   }
 
   return result;
@@ -304,12 +291,7 @@ export async function getCurrentUser(): Promise<ApiResponse<CurrentUserResponse>
 
   if (result.code === 200 && result.data) {
     setStoredCurrentUser(result.data);
-    persistLegacyUserInfo({
-      userId: result.data.userId,
-      username: result.data.username,
-      role: result.data.role,
-      status: normalizeUserStatus(result.data.status, result.data.statusText),
-    });
+    clearLegacyUserInfo();
   }
 
   return result;
@@ -329,18 +311,6 @@ export async function updateUserInfo(
   }
 
   return result;
-}
-
-function persistLegacyUserInfo(info: StoredUserInfo): void {
-  localStorage.setItem(USER_ID_KEY, String(info.userId));
-  localStorage.setItem(USERNAME_KEY, info.username);
-  localStorage.setItem(USER_ROLE_KEY, info.role);
-
-  if (info.status) {
-    localStorage.setItem(USER_STATUS_KEY, info.status);
-  } else {
-    localStorage.removeItem(USER_STATUS_KEY);
-  }
 }
 
 function getLegacyUserInfo(): StoredUserInfo | null {
@@ -366,4 +336,15 @@ function getLegacyUserInfo(): StoredUserInfo | null {
 function setStoredCurrentUser(user: StoredCurrentUser): void {
   const parsed = storedCurrentUserSchema.parse(user);
   localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(parsed));
+}
+
+function clearStoredCurrentUser(): void {
+  localStorage.removeItem(CURRENT_USER_KEY);
+}
+
+function clearLegacyUserInfo(): void {
+  localStorage.removeItem(USER_ID_KEY);
+  localStorage.removeItem(USERNAME_KEY);
+  localStorage.removeItem(USER_ROLE_KEY);
+  localStorage.removeItem(USER_STATUS_KEY);
 }

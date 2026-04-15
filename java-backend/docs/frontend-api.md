@@ -100,6 +100,8 @@ interface LoginResponse {
   userId: number;     // 用户 ID
   username: string;   // 用户名
   role: string;       // 用户角色（USER/ADMIN）
+  expiresAt: number;        // token 过期时间戳（毫秒）
+  expiresInSeconds: number; // token 剩余秒数
 }
 
 Result<LoginResponse>
@@ -113,7 +115,9 @@ Result<LoginResponse>
     "token": "eyJhbGciOiJIUzI1NiJ9...",
     "userId": 1,
     "username": "testuser",
-    "role": "USER"
+    "role": "USER",
+    "expiresAt": 1770000000000,
+    "expiresInSeconds": 3600
   }
 }
 ```
@@ -129,14 +133,14 @@ Result<LoginResponse>
 **响应：**
 ```typescript
 interface CurrentUserResponse {
-  userId: number;     // 用户 ID
-  username: string;   // 用户名
-  role: string;       // 用户角色
-  status?: number;     // 状态（1=激活, 0=禁用）
-  statusText?: 'ACTIVE' | 'DISABLED'; // 状态文本（后端实际返回值）
-  expiresAt: number;          // token 过期时间戳（具体单位取决于后端实现）
-  expiresInSeconds: number;   // token 剩余秒数
-  expired: boolean;           // token 是否已过期（当前接口固定返回 false）
+  userId: number;                 // 用户 ID
+  username: string;               // 用户名
+  role: string;                   // 用户角色
+  status?: number;                // 状态（1=激活, 0=禁用）
+  statusText?: 'ACTIVE' | 'DISABLED'; // 后端真实返回值
+  expiresAt: number;              // token 过期时间戳（毫秒）
+  expiresInSeconds: number;       // token 剩余秒数
+  expired: boolean;               // token 是否已过期（当前接口固定返回 false）
 }
 
 Result<CurrentUserResponse>
@@ -196,6 +200,10 @@ interface StreamChatRequest {
 
 所有事件的 `data` 字段均为 **JSON 字符串**，需要 `JSON.parse()` 解析。
 
+> **v2 协议（2026-04-12）**：事件统一使用 camelCase 字段；新增 `start` 事件。
+> `chunk` / `done` / `error` 事件会携带 `messageId`、`requestId`、`userId`、`conversationId`
+> 等链路字段，前端应按 `event` 名称和 `data.type` 共同处理。
+
 ##### Message ID 事件（⭐ 首个事件）
 
 ```
@@ -214,22 +222,43 @@ interface SSEMessageIdData {
 - 前端应**立即保存** `messageId`
 - 在流式生成**进行中**可以使用此 ID 调用 abort 接口
 
+##### Start 事件（v2 新增）
+
+```
+event: start
+data: {"type":"start","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"messageId":"550e8400-e29b-41d4-a716-446655440000","timestamp":1712908800000}
+```
+
+```typescript
+interface SSEStartData {
+  type: 'start';
+  messageId: string;
+  requestId: string;
+  userId: number;
+  conversationId: number;
+  timestamp?: number;
+}
+```
+
 ##### Chunk 事件（流式内容）
 
 ```
 event: chunk
-id: chunk-0
-data: {"type":"chunk","content":"内容片段","index":0}
+id: chunk-550e8400-e29b-41d4-a716-446655440000
+data: {"type":"chunk","messageId":"550e8400-e29b-41d4-a716-446655440000","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"content":"内容片段","index":0}
 ```
 
 ```typescript
 interface SSEChunkData {
   type: 'chunk';
+  messageId?: string;
+  requestId?: string;
+  userId?: number;
+  conversationId?: number;
   content: string;      // 当前生成的内容
   index: number;        // chunk 序号（从0开始）
   reasoning?: string;   // 可选：AI 思考过程
   info?: string;        // 可选：附加信息
-  conversationId?: number;  // 可选：对话ID
 }
 ```
 
@@ -237,8 +266,8 @@ interface SSEChunkData {
 
 ```
 event: done
-id: done-50
-data: {"type":"done","info":"对话完成总结","conversationId":123,"messageId":"UUID"}
+id: done-550e8400-e29b-41d4-a716-446655440000
+data: {"type":"done","messageId":"550e8400-e29b-41d4-a716-446655440000","requestId":"req-1712908800000-550e8400","userId":1,"conversationId":123,"contentLength":2,"chunkCount":2,"info":"对话完成","timestamp":1712908805000}
 ```
 
 ```typescript
@@ -247,6 +276,11 @@ interface SSEDoneData {
   info: string;              // 完成总结/标题
   conversationId: number;    // 对话ID
   messageId: string;         // ⭐ 重要：消息唯一标识（用于中断操作）
+  requestId?: string;
+  userId?: number;
+  contentLength?: number;    // v2 完整性校验字段
+  chunkCount?: number;       // v2 完整性校验字段
+  timestamp?: number;
 }
 ```
 
@@ -261,6 +295,11 @@ data: {"type":"error","message":"错误信息"}
 interface SSEErrorData {
   type: 'error';
   message: string;   // 错误描述
+  messageId?: string;
+  requestId?: string;
+  userId?: number;
+  errorCode?: string;
+  timestamp?: number;
 }
 ```
 
@@ -334,7 +373,7 @@ Result<ChatResponse>
 **请求体：**
 ```typescript
 interface AbortRequest {
-  messageId: string;   // 消息 ID（UUID，从 done 事件中获取）
+  messageId: string;   // 消息 ID（UUID，SSE 首个 message_id 事件返回；done 事件也会回传用于确认）
 }
 ```
 
@@ -556,7 +595,7 @@ interface UserDTO {
   email: string;       // 邮箱地址
   role: string;        // 用户角色（USER/ADMIN）
   status: number;      // 状态（1=激活, 0=禁用）
-  statusText: string;  // 状态文本
+  statusText: 'ACTIVE' | 'DISABLED';  // 后端真实返回值
 }
 
 Result<UserDTO>
@@ -572,7 +611,7 @@ Result<UserDTO>
     "email": "test@example.com",
     "role": "USER",
     "status": 1,
-    "statusText": "激活"
+    "statusText": "ACTIVE"
   }
 }
 ```
@@ -825,14 +864,19 @@ interface LoginResponse {
   userId: number;
   username: string;
   role: string;
+  expiresAt: number;
+  expiresInSeconds: number;
 }
 
 interface CurrentUserResponse {
   userId: number;
   username: string;
   role: string;
-  status: number;
-  statusText: string;
+  status?: number;
+  statusText?: 'ACTIVE' | 'DISABLED';
+  expiresAt: number;
+  expiresInSeconds: number;
+  expired: boolean;
 }
 
 // ==================== 流式对话模块 ====================
@@ -862,13 +906,25 @@ interface SSEMessageIdData {
   messageId: string;
 }
 
+interface SSEStartData {
+  type: 'start';
+  messageId: string;
+  requestId: string;
+  userId: number;
+  conversationId: number;
+  timestamp?: number;
+}
+
 interface SSEChunkData {
   type: 'chunk';
+  messageId?: string;
+  requestId?: string;
+  userId?: number;
+  conversationId?: number;
   content: string;
   index: number;
   reasoning?: string;
   info?: string;
-  conversationId?: number;
 }
 
 interface SSEDoneData {
@@ -876,11 +932,21 @@ interface SSEDoneData {
   info: string;
   conversationId: number;
   messageId: string;
+  requestId?: string;
+  userId?: number;
+  contentLength?: number;
+  chunkCount?: number;
+  timestamp?: number;
 }
 
 interface SSEErrorData {
   type: 'error';
   message: string;
+  messageId?: string;
+  requestId?: string;
+  userId?: number;
+  errorCode?: string;
+  timestamp?: number;
 }
 
 interface SSEPingData {
@@ -919,7 +985,7 @@ interface UserDTO {
   email: string;
   role: string;
   status: number;
-  statusText: string;
+  statusText: 'ACTIVE' | 'DISABLED';
 }
 
 interface UserUpdateRequest {
@@ -1300,6 +1366,10 @@ class StreamChatClient {
           // ⭐ 首个事件，保存 messageId
           this.messageId = data.messageId;
           console.debug('获取 messageId:', data.messageId);
+          break;
+
+        case 'start':
+          console.debug('流式开始:', data);
           break;
 
         case 'chunk':

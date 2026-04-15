@@ -75,14 +75,20 @@ export default function Sidebar({
   }, []);
 
   const canDragReorder = isDesktop && typeof onReorderConversations === 'function';
-  const username = currentUser?.username || '用户';
+  const username = currentUser?.username ?? '未加载用户';
   const userRoleLabel = currentUser
     ? currentUser.role === 'ADMIN'
       ? '管理员'
       : '普通用户'
-    : '账户';
-  const userStatusLabel = currentUser?.statusText || '已登录';
-  const userDisabled = currentUser?.status === 0 || currentUser?.statusText === '禁用';
+    : '用户资料同步中';
+  const userStatusLabel = currentUser
+    ? currentUser.statusText === 'ACTIVE'
+      ? '激活'
+      : currentUser.statusText === 'DISABLED'
+        ? '禁用'
+        : currentUser.statusText ?? '已登录'
+    : '等待后端用户信息';
+  const userDisabled = currentUser?.status === 0 || currentUser?.statusText === 'DISABLED';
 
   const handleDragStart = (e: DragEvent<HTMLDivElement>, id: string) => {
     if (!canDragReorder) {
