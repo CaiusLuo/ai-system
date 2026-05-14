@@ -146,6 +146,13 @@ jobs:
           # Only include the necessary artifacts
           tar -C deploy/release -czf "${DEPLOY_ARCHIVE}" .
 
+      - name: Inspect release archive size
+        run: |
+          echo "Release archive size details:"
+          ls -lh "${DEPLOY_ARCHIVE}"
+          echo "Top 10 largest directories in the release bundle:"
+          du -ah deploy/release | sort -rh | head -n 10
+
       - name: Configure SSH for deploy
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
