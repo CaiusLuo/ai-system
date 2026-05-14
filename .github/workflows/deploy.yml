@@ -67,6 +67,12 @@ jobs:
       - name: Checkout code (for docker-compose.yml)
         uses: actions/checkout@v4
 
+      - name: Set lower case owner name
+        run: |
+          echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
+        env:
+          OWNER: "${{ github.repository_owner }}"
+
       - name: Configure SSH
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -89,7 +95,7 @@ jobs:
       - name: Deploy via Docker Compose
         uses: appleboy/ssh-action@v1.0.3
         env:
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY_OWNER: ${{ env.OWNER_LC }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
