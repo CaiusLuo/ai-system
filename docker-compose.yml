@@ -1,0 +1,55 @@
+services:
+  minio:
+    image: quay.io/minio/minio
+    container_name: minio
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${OSS_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${OSS_SECRET_KEY}
+    volumes:
+      - /app/data/minio:/data
+    command: server /data --console-address ":9001"
+
+  java-backend:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ai-system-java:latest
+    container_name: java-backend
+    restart: always
+    depends_on:
+      - minio
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - PYTHON_AGENT_URL=http://agent-python:5001
+      - OSS_ENDPOINT=minio:9000
+    ports:
+      - "8080:8080"
+
+  agent-python:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ai-system-python:latest
+    container_name: agent-python
+    restart: always
+    depends_on:
+      - java-backend
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - JAVA_BACKEND_URL=http://java-backend:8080
+      - OSS_ENDPOINT=minio:9000
+    ports:
+      - "5001:5001"
+
+  agent-frontend:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ai-system-frontend:latest
+    container_name: agent-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - java-backend
+      - agent-python
+      - minio
