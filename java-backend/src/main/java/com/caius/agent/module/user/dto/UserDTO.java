@@ -28,6 +28,11 @@ public class UserDTO {
      * 邮箱
      */
     private String email;
+
+    /**
+     * 头像访问地址
+     */
+    private String avatarUrl;
     
     /**
      * 角色

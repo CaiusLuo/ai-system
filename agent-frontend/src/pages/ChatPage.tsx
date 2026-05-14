@@ -13,6 +13,7 @@ import {
   getConversationList,
   deleteConversation as deleteRemoteConversation,
 } from '../services/conversation';
+import { uploadAvatar as uploadAvatarFile } from '../services/storage';
 import type {
   LocalConversationSummary,
   Message,
@@ -90,6 +91,8 @@ export default function ChatPage() {
   });
   const [showAgentSettings, setShowAgentSettings] = useState(false);
   const [tempAgentName, setTempAgentName] = useState('');
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const useLocalMode = true;
   const navigate = useNavigate();
   const location = useLocation();
@@ -548,6 +551,26 @@ export default function ChatPage() {
     navigate('/chat');
   };
 
+  const handleAvatarUpload = async (file: File) => {
+    setAvatarUploadError(null);
+    setAvatarUploading(true);
+
+    try {
+      const response = await uploadAvatarFile(file);
+      if (response.code === 200) {
+        const me = await getCurrentUser();
+        if (me.code === 200 && me.data) {
+          setCurrentUser(me.data);
+        }
+      }
+    } catch (error: any) {
+      const errorMessage = error?.message || '头像上传失败';
+      setAvatarUploadError(errorMessage.replace(/^Error: /, ''));
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   const hasMessages = displayMessages.length > 0;
   const currentConvId = currentLocalConvId;
   const currentTitle = currentConvId
@@ -583,6 +606,9 @@ export default function ChatPage() {
         showAdminEntry={showAdminEntry}
         onOpenAdmin={handleOpenAdmin}
         onLogout={handleLogout}
+        onUploadAvatar={handleAvatarUpload}
+        avatarUploading={avatarUploading}
+        avatarUploadError={avatarUploadError}
         canCreateConversation={!userDisabled}
         onOpenAgentSettings={() => {
           setTempAgentName(agentName);
@@ -639,8 +665,16 @@ export default function ChatPage() {
                   title={profileUser ? `${profileUser.username} · ${profileUser.role}` : '等待后端用户信息'}
                   aria-label="查看个人资料"
                 >
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-soft)] text-xs font-medium text-[var(--text-secondary)]">
-                    {profileUser ? profileUser.username.slice(0, 1).toUpperCase() : '?'}
+                  <span className="inline-flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-[var(--surface-soft)] text-xs font-medium text-[var(--text-secondary)]">
+                    {profileUser?.avatarUrl ? (
+                      <img
+                        src={profileUser.avatarUrl}
+                        alt={`${profileUser.username} 头像`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      profileUser ? profileUser.username.slice(0, 1).toUpperCase() : '?'
+                    )}
                   </span>
                   <span className="hidden min-w-0 sm:flex sm:flex-col sm:items-start sm:leading-tight">
                     <span className="max-w-32 truncate text-sm text-[var(--text-primary)]">

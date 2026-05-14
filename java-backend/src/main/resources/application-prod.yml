@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
   datasource:
     url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:agent_db}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=true
     username: ${DB_USERNAME:root}
@@ -43,3 +47,19 @@ logging:
   level:
     com.caius.agent: warn
     org.springframework.security: warn
+
+storage:
+  minio:
+    endpoint: ${OSS_ENDPOINT:127.0.0.1:9000}
+    secure: ${OSS_SECURE:false}
+    access-key: ${OSS_ACCESS_KEY:minioadmin}
+    secret-key: ${OSS_SECRET_KEY:minioadmin}
+    public-base-url: ${OSS_PUBLIC_BASE_URL:}
+    auto-create-buckets: ${OSS_AUTO_CREATE_BUCKETS:false}
+    buckets:
+      avatar: ${OSS_BUCKET_AVATAR:avatar}
+      document: ${OSS_BUCKET_DOCUMENT:document}
+    presigned-expire-minutes: ${OSS_PRESIGNED_EXPIRE_MINUTES:30}
+    max-avatar-size: ${OSS_MAX_AVATAR_SIZE:5MB}
+    max-document-size: ${OSS_MAX_DOCUMENT_SIZE:20MB}
+    url-expire-minutes: ${OSS_URL_EXPIRE_MINUTES:1440}

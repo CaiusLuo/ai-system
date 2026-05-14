@@ -62,7 +62,7 @@ public class SecurityConfig {
                         // 公开接口（不需要认证）
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        
+
                         // Admin 接口（需要 ADMIN 角色）
                         // hasRole("ADMIN") 会检查 "ROLE_ADMIN" 权限
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

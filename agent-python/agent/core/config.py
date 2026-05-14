@@ -1,5 +1,6 @@
 """应用配置。"""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,11 +17,60 @@ class Settings(BaseSettings):
     java_backend_url: str | None = None
     java_backend_timeout: float = 5.0
 
-    app_name: str = "Job Agent API"
-    app_version: str = "1.0.0"
+    app_name: str = Field(
+        default="agent-python",
+        validation_alias=AliasChoices("APP_NAME"),
+    )
+    app_version: str = Field(
+        default="1.0.0",
+        validation_alias=AliasChoices("APP_VERSION"),
+    )
+    app_env: str = Field(
+        default="dev",
+        validation_alias=AliasChoices("APP_ENV"),
+    )
     debug: bool = False
-    host: str = "0.0.0.0"
-    port: int = 5001
+    host: str = Field(
+        default="0.0.0.0",
+        validation_alias=AliasChoices("APP_HOST", "HOST"),
+    )
+    port: int = Field(
+        default=8000,
+        validation_alias=AliasChoices("APP_PORT", "PORT"),
+    )
+
+    internal_api_token: str = Field(
+        default="change-me",
+        validation_alias=AliasChoices("INTERNAL_API_TOKEN"),
+    )
+
+    minio_endpoint: str = Field(
+        default="127.0.0.1:9000",
+        validation_alias=AliasChoices("OSS_ENDPOINT", "MINIO_ENDPOINT"),
+    )
+    minio_access_key: str = Field(
+        default="minioadmin",
+        validation_alias=AliasChoices("OSS_ACCESS_KEY", "MINIO_ACCESS_KEY"),
+    )
+    minio_secret_key: str = Field(
+        default="minioadmin",
+        validation_alias=AliasChoices("OSS_SECRET_KEY", "MINIO_SECRET_KEY"),
+    )
+    minio_secure: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("OSS_SECURE", "MINIO_SECURE"),
+    )
+
+    pdf_chunk_size: int = Field(
+        default=1000,
+        ge=100,
+        validation_alias=AliasChoices("PDF_CHUNK_SIZE"),
+    )
+    pdf_chunk_overlap: int = Field(
+        default=200,
+        ge=0,
+        validation_alias=AliasChoices("PDF_CHUNK_OVERLAP"),
+    )
 
     max_concurrent_streams: int = 1000
     per_user_stream_limit: int = 5
@@ -51,6 +101,12 @@ class Settings(BaseSettings):
     def has_llm_config(self) -> bool:
         """判断 LLM 配置是否完整可用。"""
         return bool(self.deepseek_api_key and self.deepseek_base_url)
+
+    def get_pdf_chunk_config(self) -> tuple[int, int]:
+        """返回安全的切片配置，避免 overlap 大于 size。"""
+        if self.pdf_chunk_overlap >= self.pdf_chunk_size:
+            return self.pdf_chunk_size, max(0, self.pdf_chunk_size // 5)
+        return self.pdf_chunk_size, self.pdf_chunk_overlap
 
 
 settings = Settings()

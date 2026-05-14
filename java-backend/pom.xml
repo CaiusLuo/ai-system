@@ -27,6 +27,7 @@
         <java.version>21</java.version>
         <jjwt.version>0.12.5</jjwt.version>
         <mybatis-plus.version>3.5.14</mybatis-plus.version>
+        <minio.version>8.5.17</minio.version>
     </properties>
 
     <dependencies>
@@ -101,6 +102,13 @@
             <artifactId>jjwt-jackson</artifactId>
             <version>${jjwt.version}</version>
             <scope>runtime</scope>
+        </dependency>
+
+        <!-- MinIO Object Storage -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>${minio.version}</version>
         </dependency>
 
         <!-- Lombok -->

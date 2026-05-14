@@ -13,6 +13,7 @@ export const adminUserDtoSchema = z.object({
   id: idSchema,
   username: z.string(),
   email: z.string(),
+  avatarUrl: z.string().optional().nullable(),
   role: userRoleSchema,
   status: userStatusTextSchema,
   createdAt: z.string(),

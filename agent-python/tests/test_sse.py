@@ -1,12 +1,14 @@
 """SSE 格式化工具测试"""
+
 import json
+
 from agent.core.sse import (
-    format_sse,
-    create_start_event,
     create_chunk_event,
     create_done_event,
     create_error_event,
     create_ping_event,
+    create_start_event,
+    format_sse,
 )
 
 

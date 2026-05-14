@@ -10,6 +10,7 @@ import com.caius.agent.module.admin.dto.UserListResponse;
 import com.caius.agent.module.admin.dto.UserUpdateRequest;
 import com.caius.agent.module.admin.service.impl.AdminUserServiceImpl;
 import com.caius.agent.module.user.entity.User;
+import com.caius.agent.module.user.service.AvatarUrlResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +41,9 @@ class AdminUserServiceTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private AvatarUrlResolver avatarUrlResolver;
+
     @InjectMocks
     private AdminUserServiceImpl adminUserService;
 
@@ -52,6 +56,8 @@ class AdminUserServiceTest {
         testUser.setUsername("testuser");
         testUser.setEmail("test@example.com");
         testUser.setPassword("hashedPassword");
+        testUser.setAvatarBucket("avatar");
+        testUser.setAvatarObjectKey("avatar/1/2026/04/demo.png");
         testUser.setRole("USER");
         testUser.setStatus(1);
         testUser.setDeleted(0);
@@ -73,6 +79,7 @@ class AdminUserServiceTest {
         userPage.setSize(10);
 
         when(userMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(userPage);
+        when(avatarUrlResolver.resolve(testUser)).thenReturn("https://cdn.example.com/avatar.png");
 
         // 执行测试
         UserListResponse response = adminUserService.listUsers(request);
@@ -85,6 +92,7 @@ class AdminUserServiceTest {
         assertEquals(1, response.getList().size());
         assertEquals("testuser", response.getList().get(0).getUsername());
         assertEquals("test@example.com", response.getList().get(0).getEmail());
+        assertEquals("https://cdn.example.com/avatar.png", response.getList().get(0).getAvatarUrl());
         assertEquals("USER", response.getList().get(0).getRole());
         assertEquals("ACTIVE", response.getList().get(0).getStatus());
 
@@ -104,6 +112,7 @@ class AdminUserServiceTest {
         userPage.setTotal(1L);
 
         when(userMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(userPage);
+        when(avatarUrlResolver.resolve(testUser)).thenReturn("https://cdn.example.com/avatar.png");
 
         // 执行测试
         UserListResponse response = adminUserService.listUsers(request);

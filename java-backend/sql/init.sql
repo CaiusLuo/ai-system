@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS `user` (
     `username` VARCHAR(50) NOT NULL COMMENT '用户名',
     `email` VARCHAR(100) NOT NULL COMMENT '邮箱',
     `password` VARCHAR(255) NOT NULL COMMENT '密码（加密）',
+    `avatar_bucket` VARCHAR(100) DEFAULT NULL COMMENT '头像存储 bucket',
+    `avatar_object_key` VARCHAR(512) DEFAULT NULL COMMENT '头像对象 key',
     `role` VARCHAR(20) NOT NULL DEFAULT 'USER' COMMENT '角色：USER / ADMIN',
     `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态：0-禁用，1-启用',
     `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0-未删除，1-已删除',

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type DragEvent } from 'react';
+import { useState, useRef, useEffect, type ChangeEvent, type DragEvent } from 'react';
 import type { ConversationDTO, LocalConversationSummary, StoredCurrentUser } from '../types';
 import { SidebarBrandMotion } from '../remotion';
 
@@ -22,6 +22,9 @@ interface SidebarProps {
   showAdminEntry?: boolean;
   onOpenAdmin?: () => void;
   onLogout?: () => void;
+  onUploadAvatar?: (file: File) => void | Promise<void>;
+  avatarUploading?: boolean;
+  avatarUploadError?: string | null;
   canCreateConversation?: boolean;
   onOpenAgentSettings?: () => void;
   agentName?: string;
@@ -45,12 +48,16 @@ export default function Sidebar({
   showAdminEntry,
   onOpenAdmin,
   onLogout,
+  onUploadAvatar,
+  avatarUploading = false,
+  avatarUploadError,
   canCreateConversation = true,
   onOpenAgentSettings,
   agentName = '工作台',
 }: SidebarProps) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => {
     if (typeof window === 'undefined') {
       return true;
@@ -59,6 +66,7 @@ export default function Sidebar({
     return window.matchMedia('(min-width: 1024px)').matches;
   });
   const dragOverListRef = useRef<string[]>([]);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(min-width: 1024px)');
@@ -73,6 +81,10 @@ export default function Sidebar({
       mediaQuery.removeEventListener('change', handleChange);
     };
   }, []);
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [currentUser?.avatarUrl]);
 
   const canDragReorder = isDesktop && typeof onReorderConversations === 'function';
   const username = currentUser?.username ?? '未加载用户';
@@ -89,6 +101,8 @@ export default function Sidebar({
         : currentUser.statusText ?? '已登录'
     : '等待后端用户信息';
   const userDisabled = currentUser?.status === 0 || currentUser?.statusText === 'DISABLED';
+  const avatarInitial = username.trim().slice(0, 1).toUpperCase() || 'U';
+  const canShowAvatarImage = Boolean(currentUser?.avatarUrl) && !avatarLoadFailed;
 
   const handleDragStart = (e: DragEvent<HTMLDivElement>, id: string) => {
     if (!canDragReorder) {
@@ -151,6 +165,16 @@ export default function Sidebar({
     setDraggedId(null);
     setDragOverId(null);
     dragOverListRef.current = [];
+  };
+
+  const handleAvatarInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    void onUploadAvatar?.(file);
+    event.target.value = '';
   };
 
   return (
@@ -320,24 +344,74 @@ export default function Sidebar({
             </button>
           )}
 
-          <div className="flex items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm text-[var(--text-secondary)]">{username}</p>
-              <p className={`truncate text-[11px] ${userDisabled ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
-                {userRoleLabel} · {userStatusLabel}
-              </p>
+          <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarUploading}
+                  className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] text-sm font-semibold text-[var(--accent-700)] transition-colors hover:border-[var(--accent-300)]"
+                  title="上传头像"
+                  aria-label="上传头像"
+                >
+                  {canShowAvatarImage ? (
+                    <img
+                      src={currentUser?.avatarUrl ?? ''}
+                      alt={`${username} 头像`}
+                      className="h-full w-full object-cover"
+                      onError={() => setAvatarLoadFailed(true)}
+                    />
+                  ) : (
+                    <span>{avatarInitial}</span>
+                  )}
+                  {avatarUploading && (
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/35 text-[10px] text-white">
+                      上传中
+                    </span>
+                  )}
+                </button>
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-[var(--text-secondary)]">{username}</p>
+                  <p className={`truncate text-[11px] ${userDisabled ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
+                    {userRoleLabel} · {userStatusLabel}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={avatarUploading}
+                    className="mt-1 text-[11px] font-medium text-[var(--accent-700)] transition-colors hover:text-[var(--accent-800)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)]"
+                  >
+                    {avatarUploading ? '头像上传中...' : '更换头像'}
+                  </button>
+                </div>
+              </div>
+
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
+                  title="退出登录"
+                  aria-label="退出登录"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                </button>
+              )}
             </div>
-            {onLogout && (
-              <button
-                onClick={onLogout}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
-                title="退出登录"
-                aria-label="退出登录"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
+
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleAvatarInputChange}
+            />
+
+            {avatarUploadError && (
+              <p className="mt-2 text-[11px] text-red-500">{avatarUploadError}</p>
             )}
           </div>
         </div>

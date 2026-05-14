@@ -179,10 +179,8 @@ public class StreamChatServiceImpl implements StreamChatService {
         log.info("[流式] requestBody 构建完成: {}", requestBody);
 
         // ⭐ 修复 BUG-1：立即创建 user message 和 assistant message 占位记录
-        log.info("[流式] 准备创建 user message");
         Long userMessageId = createUserMessage(userId, conversationId, request.getMessage());
         log.info("[流式] user message 创建完成, id={}", userMessageId);
-        log.info("[流式] 准备创建 assistant placeholder");
         Message assistantPlaceholder = createAssistantPlaceholder(userId, conversationId, messageId);
         log.info("[流式] assistant placeholder 创建完成, id={}", assistantPlaceholder.getId());
 

@@ -14,6 +14,8 @@ type RequestConfig<TRequest, TResponse> = {
   url: string;
   method: HttpMethod;
   body?: TRequest;
+  rawBody?: BodyInit;
+  contentType?: string | null;
   requestSchema?: z.ZodType<TRequest>;
   responseSchema: z.ZodType<TResponse>;
   options?: Omit<RequestInit, 'body' | 'method'>;
@@ -73,6 +75,8 @@ export async function request<TRequest = undefined, TResponse = unknown>({
   url,
   method,
   body,
+  rawBody,
+  contentType,
   requestSchema,
   responseSchema,
   options,
@@ -94,8 +98,9 @@ export async function request<TRequest = undefined, TResponse = unknown>({
 
   const token = getToken();
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(contentType === undefined ? { 'Content-Type': 'application/json' } : {}),
+    ...(contentType ? { 'Content-Type': contentType } : {}),
     ...options?.headers,
   };
 
@@ -103,7 +108,12 @@ export async function request<TRequest = undefined, TResponse = unknown>({
     ...options,
     method,
     headers,
-    body: validatedBody === undefined ? undefined : JSON.stringify(validatedBody),
+    body:
+      rawBody !== undefined
+        ? rawBody
+        : validatedBody === undefined
+          ? undefined
+          : JSON.stringify(validatedBody),
   });
 
   if (response.status === 401) {
@@ -198,6 +208,23 @@ export const api = {
       method: 'POST',
       body,
       requestSchema,
+      responseSchema,
+      options,
+    });
+  },
+
+  postForm<TResponse>(
+    url: string,
+    body: FormData,
+    responseSchema: z.ZodType<TResponse>,
+    options?: Omit<RequestInit, 'body' | 'method'>
+  ) {
+    return request<FormData, TResponse>({
+      url,
+      method: 'POST',
+      body,
+      rawBody: body,
+      contentType: null,
       responseSchema,
       options,
     });

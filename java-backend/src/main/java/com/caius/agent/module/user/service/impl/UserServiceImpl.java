@@ -5,6 +5,7 @@ import com.caius.agent.common.exception.BusinessException;
 import com.caius.agent.dao.UserMapper;
 import com.caius.agent.module.user.dto.UserDTO;
 import com.caius.agent.module.user.entity.User;
+import com.caius.agent.module.user.service.AvatarUrlResolver;
 import com.caius.agent.module.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -20,6 +21,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final AvatarUrlResolver avatarUrlResolver;
 
     @Override
     public UserDTO getUserById(Long userId) {
@@ -71,6 +73,18 @@ public class UserServiceImpl implements UserService {
 
         userMapper.updateById(existUser);
     }
+
+    @Override
+    public void updateAvatar(Long userId, String avatarBucket, String avatarObjectKey) {
+        User existUser = userMapper.selectById(userId);
+        if (existUser == null) {
+            throw new BusinessException("用户不存在");
+        }
+
+        existUser.setAvatarBucket(avatarBucket);
+        existUser.setAvatarObjectKey(avatarObjectKey);
+        userMapper.updateById(existUser);
+    }
     
     /**
      * 转换为 DTO
@@ -80,6 +94,7 @@ public class UserServiceImpl implements UserService {
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
+                .avatarUrl(avatarUrlResolver.resolve(user))
                 .role(user.getRole())
                 .status(user.getStatus())
                 .statusText(user.getStatus() != null && user.getStatus() == 1 ? "ACTIVE" : "DISABLED")

@@ -1,7 +1,9 @@
 """请求 Schema 测试"""
+
 import pytest
 from pydantic import ValidationError
-from agent.schemas.chat import ChatRequest, ChatStreamRequest, AbortRequest
+
+from agent.schemas.chat import AbortRequest, ChatRequest, ChatStreamRequest
 
 
 class TestChatRequest:

@@ -5,6 +5,7 @@ import com.caius.agent.common.exception.BusinessException;
 import com.caius.agent.dao.UserMapper;
 import com.caius.agent.module.user.dto.UserDTO;
 import com.caius.agent.module.user.entity.User;
+import com.caius.agent.module.user.service.AvatarUrlResolver;
 import com.caius.agent.module.user.service.impl.UserServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,6 +35,9 @@ class UserModuleTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private AvatarUrlResolver avatarUrlResolver;
+
     @InjectMocks
     private UserServiceImpl userService;
 
@@ -46,6 +50,8 @@ class UserModuleTest {
         testUser.setUsername("testuser");
         testUser.setEmail("test@example.com");
         testUser.setPassword("$2a$10$encodedPassword");
+        testUser.setAvatarBucket("avatar");
+        testUser.setAvatarObjectKey("avatar/1/2026/04/demo.png");
         testUser.setRole("USER");
         testUser.setStatus(1);
     }
@@ -58,6 +64,7 @@ class UserModuleTest {
         @DisplayName("正常获取用户信息 - 返回 DTO 不含密码")
         void getUserById_Success() {
             when(userMapper.selectById(1L)).thenReturn(testUser);
+            when(avatarUrlResolver.resolve(testUser)).thenReturn("https://cdn.example.com/avatar.png");
 
             UserDTO result = userService.getUserById(1L);
 
@@ -65,6 +72,7 @@ class UserModuleTest {
             assertEquals(1L, result.getId());
             assertEquals("testuser", result.getUsername());
             assertEquals("test@example.com", result.getEmail());
+            assertEquals("https://cdn.example.com/avatar.png", result.getAvatarUrl());
             assertEquals("USER", result.getRole());
             assertEquals(1, result.getStatus());
             assertEquals("ACTIVE", result.getStatusText());

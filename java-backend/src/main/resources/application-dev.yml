@@ -1,6 +1,10 @@
 spring:
   config:
     import: optional:classpath:application-local.yml
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/agent_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false}
     username: ${DB_USERNAME:root}
@@ -68,3 +72,19 @@ streaming:
   per-user-limit: 5             # 单用户最大流数
   max-chunks-per-message: 5000  # 单条消息最大 chunk 数
   chunk-ttl: 3600               # chunk TTL（秒）
+
+storage:
+  minio:
+    endpoint: ${OSS_ENDPOINT:127.0.0.1:9000}
+    secure: ${OSS_SECURE:false}
+    access-key: ${OSS_ACCESS_KEY:minioadmin}
+    secret-key: ${OSS_SECRET_KEY:minioadmin}
+    public-base-url: ${OSS_PUBLIC_BASE_URL:}
+    auto-create-buckets: ${OSS_AUTO_CREATE_BUCKETS:true}
+    buckets:
+      avatar: ${OSS_BUCKET_AVATAR:avatar}
+      document: ${OSS_BUCKET_DOCUMENT:document}
+    presigned-expire-minutes: ${OSS_PRESIGNED_EXPIRE_MINUTES:30}
+    max-avatar-size: ${OSS_MAX_AVATAR_SIZE:5MB}
+    max-document-size: ${OSS_MAX_DOCUMENT_SIZE:20MB}
+    url-expire-minutes: ${OSS_URL_EXPIRE_MINUTES:1440}

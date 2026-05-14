@@ -37,6 +37,7 @@ export const loginResponseSchema = z.object({
 export const currentUserResponseSchema = z.object({
   userId: idSchema,
   username: z.string(),
+  avatarUrl: z.string().optional().nullable(),
   role: userRoleSchema,
   expiresAt: z.number().optional(),
   expiresInSeconds: z.number().optional(),
@@ -49,6 +50,7 @@ export const userDtoSchema = z.object({
   id: idSchema,
   username: z.string(),
   email: z.string(),
+  avatarUrl: z.string().optional().nullable(),
   role: userRoleSchema,
   status: userStatusCodeSchema,
   statusText: userStatusResponseSchema,
@@ -57,6 +59,7 @@ export const userDtoSchema = z.object({
 export const storedCurrentUserSchema = z.object({
   userId: idSchema,
   username: z.string(),
+  avatarUrl: z.string().optional().nullable(),
   role: userRoleSchema,
   status: userStatusCodeSchema.optional(),
   statusText: userStatusResponseSchema.optional(),
@@ -73,6 +76,7 @@ export const updateUserParamsSchema = z.object({
 export const storedUserInfoSchema = z.object({
   userId: idSchema,
   username: z.string(),
+  avatarUrl: z.string().optional().nullable(),
   role: userRoleSchema,
   status: userStatusTextSchema.optional(),
 });

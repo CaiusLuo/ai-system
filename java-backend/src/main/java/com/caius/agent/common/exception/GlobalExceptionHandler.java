@@ -1,6 +1,7 @@
 package com.caius.agent.common.exception;
 
 import com.caius.agent.common.result.Result;
+import com.caius.agent.module.storage.exception.StorageException;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,15 @@ public class GlobalExceptionHandler {
             response.setStatus(HttpStatus.FORBIDDEN.value());
         }
         log.error("业务异常: {}", e.getMessage());
+        return Result.error(e.getCode(), e.getMessage());
+    }
+
+    @ExceptionHandler(StorageException.class)
+    public Result<?> handleStorageException(StorageException e, HttpServletResponse response) {
+        if (e.getCode() != null && e.getCode() < 500) {
+            response.setStatus(e.getCode());
+        }
+        log.error("对象存储异常: {}", e.getMessage());
         return Result.error(e.getCode(), e.getMessage());
     }
 

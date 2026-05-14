@@ -281,6 +281,20 @@ const AdminUserManagement: React.FC = () => {
       width: 'w-20',
     },
     {
+      title: '头像',
+      dataIndex: 'avatarUrl',
+      key: 'avatarUrl',
+      render: (value: string | null | undefined, record: User) => (
+        <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-gray-100 text-xs font-semibold text-gray-600">
+          {value ? (
+            <img src={value} alt={`${record.username} 头像`} className="h-full w-full object-cover" />
+          ) : (
+            record.username.slice(0, 1).toUpperCase()
+          )}
+        </div>
+      ),
+    },
+    {
       title: '用户名',
       dataIndex: 'username',
       key: 'username',

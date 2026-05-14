@@ -10,6 +10,7 @@ import com.caius.agent.module.admin.dto.UserListResponse;
 import com.caius.agent.module.admin.dto.UserUpdateRequest;
 import com.caius.agent.module.admin.service.AdminUserService;
 import com.caius.agent.module.user.entity.User;
+import com.caius.agent.module.user.service.AvatarUrlResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -31,6 +32,7 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final AvatarUrlResolver avatarUrlResolver;
 
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
@@ -228,6 +230,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
+                .avatarUrl(avatarUrlResolver.resolve(user))
                 .role(user.getRole())
                 .status(user.getStatus() == 1 ? "ACTIVE" : "DISABLED")
                 .createdAt(user.getCreatedAt() != null ? user.getCreatedAt().format(ISO_FORMATTER) + "Z" : null)

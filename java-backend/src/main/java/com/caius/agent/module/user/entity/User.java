@@ -21,6 +21,10 @@ public class User {
 
     private String password;
 
+    private String avatarBucket;
+
+    private String avatarObjectKey;
+
     private String role;
 
     private Integer status;

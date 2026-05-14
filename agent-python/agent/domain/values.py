@@ -1,8 +1,8 @@
 """领域值对象"""
-from enum import Enum
+from enum import StrEnum
 
 
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"

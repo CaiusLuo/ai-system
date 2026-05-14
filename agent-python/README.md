@@ -62,6 +62,12 @@ DEEPSEEK_API_KEY=your-api-key-here
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-chat
 
+# 对象存储（按需）
+OSS_ENDPOINT=127.0.0.1:9000
+OSS_ACCESS_KEY=minioadmin
+OSS_SECRET_KEY=minioadmin
+OSS_SECURE=false
+
 # 外部服务（可选）
 JAVA_BACKEND_URL=http://localhost:8080
 ```

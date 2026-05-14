@@ -9,6 +9,7 @@ import com.caius.agent.module.auth.dto.RegisterRequest;
 import com.caius.agent.module.auth.service.AuthService;
 import com.caius.agent.module.auth.service.RegistrationRateLimitService;
 import com.caius.agent.module.user.entity.User;
+import com.caius.agent.module.user.service.AvatarUrlResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class AuthController {
     private final RegistrationRateLimitService registrationRateLimitService;
     private final ClientIpResolver clientIpResolver;
     private final UserMapper userMapper;
+    private final AvatarUrlResolver avatarUrlResolver;
 
     @PostMapping("/login")
     public Result<Map<String, Object>> login(@Valid @RequestBody LoginRequest request) {
@@ -66,6 +68,7 @@ public class AuthController {
         data.put("username", user != null ? user.getUsername() : jwtUtil.getUsername(token));
         data.put("role", user != null ? user.getRole() : jwtUtil.getRole(token));
         if (user != null) {
+            data.put("avatarUrl", avatarUrlResolver.resolve(user));
             data.put("status", user.getStatus());
             data.put("statusText", user.getStatus() != null && user.getStatus() == 1 ? "ACTIVE" : "DISABLED");
         }

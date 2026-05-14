@@ -19,6 +19,7 @@ import {
   userListParamsSchema,
   userListResponseSchema,
 } from './admin';
+import { documentBizTypeSchema, storageUploadResponseSchema } from './storage';
 import {
   abortRequestSchema,
   chatRequestSchema,
@@ -48,6 +49,7 @@ export * from './admin';
 export * from './chat';
 export * from './conversation';
 export * from './localChat';
+export * from './storage';
 
 export type LoginParams = z.infer<typeof loginParamsSchema>;
 export type RegisterParams = z.infer<typeof registerParamsSchema>;
@@ -85,6 +87,8 @@ export type CreateUserParams = z.infer<typeof createUserParamsSchema>;
 export type UpdateAdminUserParams = z.infer<typeof updateAdminUserParamsSchema>;
 export type AdminUserFormState = z.infer<typeof adminUserFormSchema>;
 export type AdminFeedbackMessage = z.infer<typeof adminFeedbackMessageSchema>;
+export type StorageUploadResponse = z.infer<typeof storageUploadResponseSchema>;
+export type DocumentBizType = z.infer<typeof documentBizTypeSchema>;
 
 export type StoredMessage = z.infer<typeof storedMessageSchema>;
 export type StoredConversation = z.infer<typeof storedConversationSchema>;

@@ -17,4 +17,9 @@ public interface UserService {
      * 更新用户信息
      */
     void updateUser(Long userId, User user);
+
+    /**
+     * 更新用户头像存储信息
+     */
+    void updateAvatar(Long userId, String avatarBucket, String avatarObjectKey);
 }

@@ -8,6 +8,7 @@ import com.caius.agent.module.auth.controller.AuthController;
 import com.caius.agent.module.auth.service.AuthService;
 import com.caius.agent.module.auth.service.RegistrationRateLimitService;
 import com.caius.agent.module.user.entity.User;
+import com.caius.agent.module.user.service.AvatarUrlResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,8 @@ class AuthControllerTest {
     @Mock
     private UserMapper userMapper;
     @Mock
+    private AvatarUrlResolver avatarUrlResolver;
+    @Mock
     private HttpServletRequest request;
 
     @Test
@@ -46,7 +49,8 @@ class AuthControllerTest {
                 jwtUtil,
                 registrationRateLimitService,
                 clientIpResolver,
-                userMapper
+                userMapper,
+                avatarUrlResolver
         );
 
         User user = new User();
@@ -57,6 +61,7 @@ class AuthControllerTest {
 
         when(request.getHeader("Authorization")).thenReturn("Bearer token");
         when(userMapper.selectById(1L)).thenReturn(user);
+        when(avatarUrlResolver.resolve(user)).thenReturn("https://cdn.example.com/avatar.png");
         when(jwtUtil.getExpirationTimestamp("token")).thenReturn(1744360000000L);
         when(jwtUtil.getRemainingSeconds("token")).thenReturn(3600L);
 
@@ -65,6 +70,7 @@ class AuthControllerTest {
         assertNotNull(result.getData());
         assertEquals("updatedName", result.getData().get("username"));
         assertEquals("ADMIN", result.getData().get("role"));
+        assertEquals("https://cdn.example.com/avatar.png", result.getData().get("avatarUrl"));
         assertEquals(0, result.getData().get("status"));
         assertEquals("DISABLED", result.getData().get("statusText"));
     }

@@ -15,23 +15,24 @@ Job Agent API - FastAPI 应用入口
 - 中断流式生成：POST /api/v1/chat/stream/abort
 - 健康检查：GET /api/v1/health
 """
-from contextlib import asynccontextmanager
 import logging
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+
 import uvicorn
-
-from agent.core.config import settings
-from agent.core.logging import setup_logging
-from agent.core.middleware import RequestLoggingMiddleware, setup_cors
-from agent.core.exceptions import AgentException, LLMServiceError, ExternalServiceError
-from agent.core.abort import AbortController
-
-from agent.infrastructure.llm.deepseek_service import DeepSeekService
-from agent.infrastructure.external.java_backend_client import JavaBackendClient
-from agent.application.agent.graph import JobAgentGraph
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from agent.api.v1.router import api_router, api_router_compat
+from agent.application.agent.graph import JobAgentGraph
+from agent.core.abort import AbortController
+from agent.core.config import settings
+from agent.core.exceptions import AgentException
+from agent.core.logging import setup_logging
+from agent.core.middleware import RequestLoggingMiddleware, setup_cors
+from agent.infrastructure.external.java_backend_client import JavaBackendClient
+from agent.infrastructure.llm.deepseek_service import DeepSeekService
 
 
 class AppState:
@@ -43,6 +44,20 @@ class AppState:
 
 
 app_state = AppState()
+
+
+def _error_payload(message: str, code: int, detail: object | None = None) -> dict:
+    """统一错误响应结构。"""
+
+    payload = {
+        "success": False,
+        "data": None,
+        "message": message,
+        "code": code,
+    }
+    if settings.debug and detail is not None:
+        payload["detail"] = detail
+    return payload
 
 
 @asynccontextmanager
@@ -111,50 +126,64 @@ def create_app() -> FastAPI:
     ):
         return JSONResponse(
             status_code=exc.status_code,
-            content=exc.to_dict(),
+            content=_error_payload(
+                message=exc.message,
+                code=exc.code,
+                detail=exc.detail,
+            ),
         )
 
-    @app.exception_handler(LLMServiceError)
-    async def llm_service_error_handler(
-        request: Request, exc: LLMServiceError
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(
+        request: Request, exc: RequestValidationError
     ):
         return JSONResponse(
-            status_code=502,
-            content={
-                "error_code": "LLM_SERVICE_ERROR",
-                "message": "AI 服务暂时不可用，请稍后重试",
-                "detail": str(exc.detail) if exc.detail else None,
-            },
+            status_code=422,
+            content=_error_payload(
+                message="request validation failed",
+                code=4000,
+                detail=exc.errors(),
+            ),
         )
 
-    @app.exception_handler(ExternalServiceError)
-    async def external_service_error_handler(
-        request: Request, exc: ExternalServiceError
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(
+        request: Request, exc: HTTPException
     ):
         return JSONResponse(
-            status_code=502,
-            content={
-                "error_code": "EXTERNAL_SERVICE_ERROR",
-                "message": "外部服务调用失败",
-                "detail": str(exc.detail) if exc.detail else None,
-            },
+            status_code=exc.status_code,
+            content=_error_payload(
+                message=str(exc.detail),
+                code=exc.status_code,
+            ),
         )
 
     @app.exception_handler(Exception)
     async def global_exception_handler(
         request: Request, exc: Exception
     ):
-        import logging
         logger = logging.getLogger(__name__)
         logger.error(f"未处理的异常: {exc}", exc_info=True)
         return JSONResponse(
             status_code=500,
-            content={
-                "error_code": "INTERNAL_ERROR",
-                "message": "服务器内部错误",
-                "detail": str(exc) if settings.debug else None,
-            },
+            content=_error_payload(
+                message="internal server error",
+                code=5000,
+                detail=str(exc),
+            ),
         )
+
+    @app.get("/health", summary="健康检查")
+    async def root_health():
+        return {
+            "success": True,
+            "data": {
+                "status": "ok",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+            "message": "ok",
+            "code": 0,
+        }
 
     # 注册路由
     app.include_router(api_router)
