@@ -143,15 +143,8 @@ jobs:
 
       - name: Create release archive
         run: |
+          # Only include the necessary artifacts
           tar -C deploy/release -czf "${DEPLOY_ARCHIVE}" .
-
-      - name: Inspect release archive
-        run: |
-          echo "Release bundle contents:"
-          find deploy/release -maxdepth 3 -type f | sort
-          echo
-          du -sh deploy/release
-          ls -lh "${DEPLOY_ARCHIVE}"
 
       - name: Configure SSH for deploy
         env:
@@ -164,20 +157,15 @@ jobs:
           chmod 600 "$HOME/.ssh/deploy_key"
           ssh-keyscan -p "${SERVER_PORT}" -H "${SERVER_HOST}" >> "$HOME/.ssh/known_hosts"
 
-      - name: Upload release archive to server
+      - name: Upload release archive to server (Optimized with rsync)
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          scp \
-            -i "$HOME/.ssh/deploy_key" \
-            -P "${SERVER_PORT}" \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=30 \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
+          # Use rsync for compression and better reliability over slow connections
+          rsync -avz \
+            -e "ssh -i $HOME/.ssh/deploy_key -p ${SERVER_PORT} -o BatchMode=yes -o StrictHostKeyChecking=yes" \
             "${DEPLOY_ARCHIVE}" \
             "${SERVER_USER}@${SERVER_HOST}:/tmp/${DEPLOY_ARCHIVE}"
 
@@ -259,9 +247,30 @@ jobs:
             mkdir -p "$APP_DIR/releases" "$SHARED_DIR" "$RELEASE_DIR"
             tar -xzf "$TMP_ARCHIVE" -C "$RELEASE_DIR"
 
-            "$PYTHON_BIN" -m venv "$RELEASE_DIR/agent-python/.venv"
-            "$RELEASE_DIR/agent-python/.venv/bin/pip" install --upgrade --no-cache-dir pip
-            "$RELEASE_DIR/agent-python/.venv/bin/pip" install --no-cache-dir -r "$RELEASE_DIR/agent-python/requirements.txt"
+            # --- Persistent Python Venv Optimization ---
+            VENV_PATH="$SHARED_DIR/venv"
+            REQ_HASH_FILE="$SHARED_DIR/requirements.hash"
+            CURRENT_REQ_HASH=$(md5sum "$RELEASE_DIR/agent-python/requirements.txt" | cut -d' ' -f1)
+
+            if [ ! -d "$VENV_PATH" ]; then
+              echo "Creating new persistent virtual environment..."
+              "$PYTHON_BIN" -m venv "$VENV_PATH"
+              "$VENV_PATH/bin/pip" install --upgrade --no-cache-dir pip
+              "$VENV_PATH/bin/pip" install --no-cache-dir -r "$RELEASE_DIR/agent-python/requirements.txt"
+              echo "$CURRENT_REQ_HASH" > "$REQ_HASH_FILE"
+            else
+              if [ ! -f "$REQ_HASH_FILE" ] || [ "$(cat "$REQ_HASH_FILE")" != "$CURRENT_REQ_HASH" ]; then
+                echo "Requirements changed, updating persistent virtual environment..."
+                "$VENV_PATH/bin/pip" install --no-cache-dir -r "$RELEASE_DIR/agent-python/requirements.txt"
+                echo "$CURRENT_REQ_HASH" > "$REQ_HASH_FILE"
+              else
+                echo "Requirements unchanged, skipping pip install."
+              fi
+            fi
+
+            # Link the shared venv to the release
+            ln -sfn "$VENV_PATH" "$RELEASE_DIR/agent-python/.venv"
+            # -------------------------------------------
 
             printf '%s\n' "DB_HOST=${DB_HOST}" "DB_PORT=${DB_PORT}" "DB_NAME=${DB_NAME}" "DB_USERNAME=${DB_USERNAME}" "DB_PASSWORD=${DB_PASSWORD}" "REDIS_HOST=${REDIS_HOST}" "REDIS_PORT=${REDIS_PORT}" "REDIS_PASSWORD=${REDIS_PASSWORD}" "JWT_SECRET=${JWT_SECRET}" "PYTHON_AGENT_URL=http://127.0.0.1:5001" "OSS_ENDPOINT=${OSS_ENDPOINT}" "OSS_SECURE=${OSS_SECURE:-false}" "OSS_ACCESS_KEY=${OSS_ACCESS_KEY}" "OSS_SECRET_KEY=${OSS_SECRET_KEY}" "OSS_PUBLIC_BASE_URL=${OSS_PUBLIC_BASE_URL:-}" "OSS_AUTO_CREATE_BUCKETS=${OSS_AUTO_CREATE_BUCKETS:-false}" "OSS_BUCKET_AVATAR=${OSS_BUCKET_AVATAR:-avatar}" "OSS_BUCKET_DOCUMENT=${OSS_BUCKET_DOCUMENT:-document}" "OSS_PRESIGNED_EXPIRE_MINUTES=${OSS_PRESIGNED_EXPIRE_MINUTES:-30}" "OSS_URL_EXPIRE_MINUTES=${OSS_URL_EXPIRE_MINUTES:-1440}" "OSS_MAX_AVATAR_SIZE=${OSS_MAX_AVATAR_SIZE:-5MB}" "OSS_MAX_DOCUMENT_SIZE=${OSS_MAX_DOCUMENT_SIZE:-20MB}" > "$SHARED_DIR/java-backend.env"
 
