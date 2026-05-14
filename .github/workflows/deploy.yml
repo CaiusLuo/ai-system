@@ -311,3 +311,37 @@ jobs:
               | xargs -r rm -rf --
 
             rm -rf "$HOME/.cache/pip"
+
+            ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+
+            printf '%s\n' '[Unit]' 'Description=AI System Java Backend' 'After=network.target mysql.service redis-server.service' '' '[Service]' 'Type=simple' "WorkingDirectory=${CURRENT_LINK}/java-backend" "EnvironmentFile=${SHARED_DIR}/java-backend.env" "ExecStart=/usr/bin/java -jar ${CURRENT_LINK}/java-backend/java-backend.jar --spring.profiles.active=prod" 'Restart=always' 'RestartSec=5' "User=$(id -un)" '' '[Install]' 'WantedBy=multi-user.target' | sudo tee "/etc/systemd/system/${JAVA_SERVICE_NAME}.service" >/dev/null
+
+            printf '%s\n' '[Unit]' 'Description=AI System Python Agent' "After=network.target ${JAVA_SERVICE_NAME}.service" '' '[Service]' 'Type=simple' "WorkingDirectory=${CURRENT_LINK}/agent-python" "EnvironmentFile=${SHARED_DIR}/agent-python.env" "ExecStart=${CURRENT_LINK}/agent-python/.venv/bin/python ${CURRENT_LINK}/agent-python/main.py" 'Restart=always' 'RestartSec=5' "User=$(id -un)" '' '[Install]' 'WantedBy=multi-user.target' | sudo tee "/etc/systemd/system/${PYTHON_SERVICE_NAME}.service" >/dev/null
+
+            printf '%s\n' 'server {' '    listen 80;' "    server_name ${SERVER_DOMAIN:-_};" '' "    root ${CURRENT_LINK}/agent-frontend/dist;" '    index index.html;' '' '    location / {' '        try_files $uri $uri/ /index.html;' '    }' '' '    location ~ ^/(auth|user|conversation|api|agent)(/.*)?$ {' '        proxy_pass http://127.0.0.1:8080;' '        proxy_http_version 1.1;' '        proxy_set_header Host $host;' '        proxy_set_header X-Real-IP $remote_addr;' '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' '        proxy_set_header X-Forwarded-Proto $scheme;' '        proxy_set_header Connection "";' '        proxy_buffering off;' '        proxy_read_timeout 300s;' '    }' '' '    location /oss/ {' '        proxy_pass http://127.0.0.1:9000/;' '        proxy_set_header Host $host;' '        proxy_set_header X-Real-IP $remote_addr;' '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' '        proxy_set_header X-Forwarded-Proto $scheme;' '        client_max_body_size 100M;' '    }' '}' | sudo tee "/etc/nginx/sites-available/${NGINX_SITE_NAME}.conf" >/dev/null
+
+            sudo ln -sfn "/etc/nginx/sites-available/${NGINX_SITE_NAME}.conf" "/etc/nginx/sites-enabled/${NGINX_SITE_NAME}.conf"
+            sudo rm -f /etc/nginx/sites-enabled/default
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable "${JAVA_SERVICE_NAME}" "${PYTHON_SERVICE_NAME}"
+            sudo systemctl restart "${JAVA_SERVICE_NAME}" "${PYTHON_SERVICE_NAME}"
+            sudo nginx -t
+            sudo systemctl reload nginx
+
+            systemctl is-active "${JAVA_SERVICE_NAME}"
+            systemctl is-active "${PYTHON_SERVICE_NAME}"
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if curl --fail --silent http://127.0.0.1:5001/api/v1/health >/dev/null; then
+                break
+              fi
+              sleep 2
+            done
+            curl --fail --silent http://127.0.0.1:5001/api/v1/health >/dev/null
+
+            find "$APP_DIR/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+              | sort -nr \
+              | awk -v keep="$KEEP_RELEASES" 'NR > keep { $1=""; sub(/^ /, ""); print }' \
+              | xargs -r rm -rf --
+
+            rm -rf "$HOME/.cache/pip"
