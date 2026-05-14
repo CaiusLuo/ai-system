@@ -17,6 +17,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set lower case owner name
+        run: |
+          echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
+        env:
+          OWNER: "${{ github.repository_owner }}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -32,7 +38,7 @@ jobs:
         with:
           context: ./agent-frontend
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/ai-system-frontend:latest
+          tags: ghcr.io/${{ env.OWNER_LC }}/ai-system-frontend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -41,7 +47,7 @@ jobs:
         with:
           context: ./java-backend
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/ai-system-java:latest
+          tags: ghcr.io/${{ env.OWNER_LC }}/ai-system-java:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -50,7 +56,7 @@ jobs:
         with:
           context: ./agent-python
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/ai-system-python:latest
+          tags: ghcr.io/${{ env.OWNER_LC }}/ai-system-python:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
