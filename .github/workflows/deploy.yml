@@ -84,7 +84,7 @@ jobs:
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          scp -i "$HOME/.ssh/deploy_key" -P "${SERVER_PORT}" docker-compose.yml "${SERVER_USER}@${SERVER_USER}@${SERVER_HOST}:/app/ai-system/docker-compose.yml"
+          scp -i "$HOME/.ssh/deploy_key" -P "${SERVER_PORT}" docker-compose.yml "${SERVER_USER}@${SERVER_HOST}:/app/ai-system/docker-compose.yml"
 
       - name: Deploy via Docker Compose
         uses: appleboy/ssh-action@v1.0.3
