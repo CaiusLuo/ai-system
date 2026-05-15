@@ -17,6 +17,10 @@ RUN java -Djarmode=layertools -jar app.jar extract
 # Stage 3: Run - Final lightweight image
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
+
+# Install curl for healthchecks
+RUN apk add --no-cache curl
+
 # Copy layers from extractor stage. Order matters for caching: 
 # least changed (dependencies) to most changed (application)
 COPY --from=extractor /app/dependencies/ ./
