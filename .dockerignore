@@ -1,0 +1,10 @@
+.git
+.github
+*.md
+.gitignore
+.dockerignore
+node_modules
+target
+.venv
+__pycache__
+*.log
