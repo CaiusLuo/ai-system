@@ -1,4 +1,4 @@
-name: Deploy (Docker)
+name: Deploy (Tencent Cloud Docker)
 
 on:
   push:
@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build-and-push:
@@ -17,28 +16,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set lower case owner name
-        run: |
-          echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
-        env:
-          OWNER: "${{ github.repository_owner }}"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
+      - name: Login to Tencent Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }}
+          registry: ${{ secrets.TENCENT_REGISTRY }}
+          username: ${{ secrets.TENCENT_USERNAME }}
+          password: ${{ secrets.TENCENT_PASSWORD }}
 
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
         with:
           context: ./agent-frontend
           push: true
-          tags: ghcr.io/${{ env.OWNER_LC }}/ai-system-frontend:latest
+          tags: ${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/frontend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -47,7 +40,7 @@ jobs:
         with:
           context: ./java-backend
           push: true
-          tags: ghcr.io/${{ env.OWNER_LC }}/ai-system-java:latest
+          tags: ${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/java:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -56,7 +49,7 @@ jobs:
         with:
           context: ./agent-python
           push: true
-          tags: ghcr.io/${{ env.OWNER_LC }}/ai-system-python:latest
+          tags: ${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/python:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -97,7 +90,7 @@ jobs:
             set -e
             cd /app/ai-system
             
-            # Stop existing systemd services if they are running (First time only)
+            # Stop existing systemd services if they are running (Migration only)
             sudo systemctl stop ai-system-java ai-system-python || true
             sudo systemctl disable ai-system-java ai-system-python || true
             
@@ -107,8 +100,10 @@ jobs:
               exit 1
             fi
             
+            # Login to Tencent Registry on server (important!)
+            # Note: We assume you've already run 'docker login' manually on the server once.
+            
             # Pull latest images and restart containers
-            # Docker Compose will automatically use the values from your server's local .env file
             docker compose pull
             docker compose up -d --remove-orphans
             

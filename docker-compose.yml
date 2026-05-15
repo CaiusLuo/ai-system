@@ -14,7 +14,7 @@ services:
     command: server /data --console-address ":9001"
 
   java-backend:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ai-system-java:latest
+    image: ccr.ccs.tencentyun.com/ai-system-repo/java:latest
     container_name: java-backend
     restart: always
     depends_on:
@@ -29,7 +29,7 @@ services:
       - "8080:8080"
 
   agent-python:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ai-system-python:latest
+    image: ccr.ccs.tencentyun.com/ai-system-repo/python:latest
     container_name: agent-python
     restart: always
     depends_on:
@@ -44,7 +44,7 @@ services:
       - "5001:5001"
 
   agent-frontend:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ai-system-frontend:latest
+    image: ccr.ccs.tencentyun.com/ai-system-repo/frontend:latest
     container_name: agent-frontend
     restart: always
     ports:
