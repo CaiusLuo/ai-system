@@ -1,29 +1,31 @@
-# Build stage
-FROM maven:3.9-eclipse-temurin-21-alpine AS build
+# Stage 1: Build - Use Maven to package the application
+FROM maven:3.9-eclipse-temurin-21-alpine AS builder
 WORKDIR /app
-
-# NO ALIYUN MIRROR HERE - GitHub Runners are in US/EU, 
-# default Maven Central is much faster for them.
-
-# Copy pom.xml first to resolve dependencies
+# Only copy pom.xml to cache dependencies
 COPY pom.xml .
 RUN mvn dependency:resolve -B
-
-# Copy source and build
+# Build the application
 COPY src ./src
 RUN mvn package -DskipTests
 
-# Run stage
+# Stage 2: Extract - Use Spring Boot's layertools to separate dependencies
+FROM eclipse-temurin:21-jre-alpine AS extractor
+WORKDIR /app
+COPY --from=builder /app/target/*.jar app.jar
+RUN java -Djarmode=layertools -jar app.jar extract
+
+# Stage 3: Run - Final lightweight image
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-
-# Copy dependencies first (these change rarely)
-COPY --from=build /app/target/lib ./lib
-# Copy the thin jar
-COPY --from=build /app/target/*.jar app.jar
+# Copy layers from extractor stage. Order matters for caching: 
+# least changed (dependencies) to most changed (application)
+COPY --from=extractor /app/dependencies/ ./
+COPY --from=extractor /app/spring-boot-loader/ ./
+COPY --from=extractor /app/snapshot-dependencies/ ./
+COPY --from=extractor /app/application/ ./
 
 ENV SPRING_PROFILES_ACTIVE=prod
-
 EXPOSE 8080
-# Run with classpath including lib folder
-ENTRYPOINT ["java", "-cp", "app.jar:lib/*", "com.caius.agent.JavaBackendApplication"]
+
+# Use JarLauncher to start the application (native Spring Boot layered entrypoint)
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

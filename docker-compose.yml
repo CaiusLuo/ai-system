@@ -12,13 +12,19 @@ services:
     volumes:
       - /app/data/minio:/data
     command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   java-backend:
     image: ccr.ccs.tencentyun.com/ai-system-repo/java:latest
     container_name: java-backend
     restart: always
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -27,13 +33,20 @@ services:
       - OSS_ENDPOINT=minio:9000
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   agent-python:
     image: ccr.ccs.tencentyun.com/ai-system-repo/python:latest
     container_name: agent-python
     restart: always
     depends_on:
-      - java-backend
+      java-backend:
+        condition: service_healthy
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -50,6 +63,7 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - java-backend
-      - agent-python
-      - minio
+      java-backend:
+        condition: service_healthy
+      agent-python:
+        condition: service_healthy

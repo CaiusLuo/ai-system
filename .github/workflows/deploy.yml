@@ -1,9 +1,8 @@
-name: Deploy (Tencent Cloud Docker)
+name: Deploy (Production Optimized)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,105 +12,93 @@ jobs:
   build-frontend:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Login to Tencent Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.TENCENT_REGISTRY }}
           username: ${{ secrets.TENCENT_USERNAME }}
           password: ${{ secrets.TENCENT_PASSWORD }}
-
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
         with:
           context: ./agent-frontend
           push: true
           tags: ${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/frontend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Using registry cache instead of GHA cache to avoid 'exporting layers' bottleneck
+          cache-from: type=registry,ref=${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/frontend:buildcache
+          cache-to: type=registry,ref=${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/frontend:buildcache,mode=max
 
   build-java:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Login to Tencent Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.TENCENT_REGISTRY }}
           username: ${{ secrets.TENCENT_USERNAME }}
           password: ${{ secrets.TENCENT_PASSWORD }}
-
       - name: Build and push Java Backend
         uses: docker/build-push-action@v5
         with:
           context: ./java-backend
           push: true
           tags: ${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/java:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Layered JARs are extremely efficient with registry caching
+          cache-from: type=registry,ref=${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/java:buildcache
+          cache-to: type=registry,ref=${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/java:buildcache,mode=max
 
   build-python:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Login to Tencent Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.TENCENT_REGISTRY }}
           username: ${{ secrets.TENCENT_USERNAME }}
           password: ${{ secrets.TENCENT_PASSWORD }}
-
       - name: Build and push Python Agent
         uses: docker/build-push-action@v5
         with:
           context: ./agent-python
           push: true
           tags: ${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/python:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/python:buildcache
+          cache-to: type=registry,ref=${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/python:buildcache,mode=max
 
   deploy:
     runs-on: ubuntu-latest
     needs: [build-frontend, build-java, build-python]
     steps:
-      - name: Checkout code (for docker-compose.yml)
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Configure SSH
         env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
-          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
         run: |
           install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "${SERVER_SSH_KEY}" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
-          ssh-keyscan -p "${SERVER_PORT}" -H "${SERVER_HOST}" >> "$HOME/.ssh/known_hosts"
+          ssh-keyscan -p "$SERVER_PORT" -H "$SERVER_HOST" >> "$HOME/.ssh/known_hosts"
 
-      - name: Copy docker-compose.yml to server
+      - name: Sync docker-compose.yml
         env:
+          SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          scp -i "$HOME/.ssh/deploy_key" -P "${SERVER_PORT}" docker-compose.yml "${SERVER_USER}@${SERVER_HOST}:/app/ai-system/docker-compose.yml"
+          scp -i "$HOME/.ssh/deploy_key" -P "$SERVER_PORT" docker-compose.yml "$SERVER_USER@$SERVER_HOST:/app/ai-system/docker-compose.yml"
 
-      - name: Deploy via Docker Compose
+      - name: Remote Deployment Execution
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -122,19 +109,18 @@ jobs:
             set -e
             cd /app/ai-system
             
-            # Stop existing systemd services if they are running (Migration only)
+            # Legacy systemd cleanup (if necessary)
             sudo systemctl stop ai-system-java ai-system-python || true
             sudo systemctl disable ai-system-java ai-system-python || true
             
-            # Ensure .env exists
             if [ ! -f .env ]; then
-              echo "Error: .env file not found in /app/ai-system/. Please create it from .env.example"
+              echo "Deployment halted: .env missing."
               exit 1
             fi
             
-            # Pull latest images and restart containers
-            docker compose pull
+            # Pull with parallelism and update containers
+            docker compose pull --quiet
             docker compose up -d --remove-orphans
             
-            # Cleanup old images
+            # Purge dangling images to save disk space
             docker image prune -f
