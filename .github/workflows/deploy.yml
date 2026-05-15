@@ -120,7 +120,13 @@ jobs:
             
             # Pull with parallelism and update containers
             docker compose pull --quiet
-            docker compose up -d --remove-orphans
+            if ! docker compose up -d --remove-orphans; then
+              echo "=========== DEPLOYMENT FAILED ==========="
+              echo "Fetching logs for agent-python:"
+              docker logs agent-python --tail 100
+              echo "========================================="
+              exit 1
+            fi
             
             # Purge dangling images to save disk space
             docker image prune -f
