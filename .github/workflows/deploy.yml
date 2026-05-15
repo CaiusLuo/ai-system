@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-push:
+  build-frontend:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -35,6 +35,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  build-java:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Tencent Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.TENCENT_REGISTRY }}
+          username: ${{ secrets.TENCENT_USERNAME }}
+          password: ${{ secrets.TENCENT_PASSWORD }}
+
       - name: Build and push Java Backend
         uses: docker/build-push-action@v5
         with:
@@ -43,6 +59,22 @@ jobs:
           tags: ${{ secrets.TENCENT_REGISTRY }}/ai-system-repo/java:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  build-python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Tencent Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.TENCENT_REGISTRY }}
+          username: ${{ secrets.TENCENT_USERNAME }}
+          password: ${{ secrets.TENCENT_PASSWORD }}
 
       - name: Build and push Python Agent
         uses: docker/build-push-action@v5
@@ -55,7 +87,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: build-and-push
+    needs: [build-frontend, build-java, build-python]
     steps:
       - name: Checkout code (for docker-compose.yml)
         uses: actions/checkout@v4
@@ -99,9 +131,6 @@ jobs:
               echo "Error: .env file not found in /app/ai-system/. Please create it from .env.example"
               exit 1
             fi
-            
-            # Login to Tencent Registry on server (important!)
-            # Note: We assume you've already run 'docker login' manually on the server once.
             
             # Pull latest images and restart containers
             docker compose pull
