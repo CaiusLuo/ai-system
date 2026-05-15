@@ -63,3 +63,13 @@ storage:
     max-avatar-size: ${OSS_MAX_AVATAR_SIZE:5MB}
     max-document-size: ${OSS_MAX_DOCUMENT_SIZE:20MB}
     url-expire-minutes: ${OSS_URL_EXPIRE_MINUTES:1440}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when_authorized
+
