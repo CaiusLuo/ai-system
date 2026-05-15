@@ -3,10 +3,10 @@ FROM maven:3.9-eclipse-temurin-21-alpine AS builder
 WORKDIR /app
 # Only copy pom.xml to cache dependencies
 COPY pom.xml .
-RUN mvn dependency:resolve -B
+RUN --mount=type=cache,target=/root/.m2 mvn dependency:resolve -B
 # Build the application
 COPY src ./src
-RUN mvn package -DskipTests
+RUN --mount=type=cache,target=/root/.m2 mvn package -DskipTests
 
 # Stage 2: Extract - Use Spring Boot's layertools to separate dependencies
 FROM eclipse-temurin:21-jre-alpine AS extractor
