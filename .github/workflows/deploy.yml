@@ -119,14 +119,49 @@ jobs:
             fi
             
             # Pull with parallelism and update containers
+            echo "[TRACE] 阶段 1: 拉取最新镜像"
             docker compose pull --quiet
+
+            # [INTENT] 主动触发旧容器停止，打断生命周期，为内核回收 TIME_WAIT 状态及引擎释放资源创造明确的时间窗口。
+            echo "[TRACE] 阶段 2: 停机排空 - 强制释放目标端口"
+            docker compose stop agent-frontend || true
+
+            # [INTENT] 智能等待机制。探活宿主机 80 端口，避免静态 sleep 拖慢 CI，最大容忍 30 秒。
+            echo "[TRACE] 阶段 3: 端口状态检查与等待"
+            WAIT_TIMEOUT=30
+            for ((i=1; i<=WAIT_TIMEOUT; i++)); do
+              if ! ss -ant | grep -qP ':(80)\b'; then
+                echo "[TRACE] 端口 80 已彻底释放 (耗时: ${i}s)"
+                break
+              fi
+              if [ "$i" -eq "$WAIT_TIMEOUT" ]; then
+                echo "[WARN] 端口 80 等待超时，尝试强制执行 up"
+              fi
+              sleep 1
+            done
+
+            # [INTENT] 执行核心启动逻辑。结合业务“重试即成功”的特征，注入单次防抖重试机制，对冲 Compose 内部竞态残留。
+            echo "[TRACE] 阶段 4: 启动容器编排"
             if ! docker compose up -d --remove-orphans; then
-              echo "=========== DEPLOYMENT FAILED ==========="
-              echo "Fetching logs for agent-python:"
-              docker logs agent-python --tail 100
-              echo "========================================="
-              exit 1
+              echo "[TRACE] 首次启动失败，等待 5 秒缓冲状态机后触发单次重试..."
+              sleep 5
+              if ! docker compose up -d --remove-orphans; then
+                echo "[ERROR] 致命错误：重试启动依然失败！"
+                
+                # [INTENT] 全量故障现场保留。摒弃旧版单点观测，捕获上下游全链路尾部日志，防范级联雪崩导致的误判。
+                echo "================ 全链路异常快照 ================"
+                echo ">>> Fetching logs for agent-frontend:"
+                docker logs agent-frontend --tail 100 || true
+                echo ">>> Fetching logs for java-backend:"
+                docker logs java-backend --tail 100 || true
+                echo ">>> Fetching logs for agent-python:"
+                docker logs agent-python --tail 100 || true
+                echo "================================================"
+                exit 1
+              fi
             fi
             
-            # Purge dangling images to save disk space
+            # [INTENT] 环境清理
+            echo "[TRACE] 阶段 5: 环境清理"
             docker image prune -f
+            echo "[TRACE] 部署流程执行完毕！"
