@@ -13,7 +13,8 @@ import {
   getConversationList,
   deleteConversation as deleteRemoteConversation,
 } from '../services/conversation';
-import { uploadAvatar as uploadAvatarFile } from '../services/storage';
+import { uploadAvatar as uploadAvatarFile, uploadDocument } from '../services/storage';
+import ResumeUpload, { type UploadedResume } from '../components/ResumeUpload';
 import type {
   LocalConversationSummary,
   Message,
@@ -93,6 +94,17 @@ export default function ChatPage() {
   const [tempAgentName, setTempAgentName] = useState('');
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const [resumeUploadError, setResumeUploadError] = useState<string | null>(null);
+  const [uploadedResumes, setUploadedResumes] = useState<UploadedResume[]>(() => {
+    try {
+      const stored = localStorage.getItem('uploaded_resumes');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showResumePanel, setShowResumePanel] = useState(false);
   const useLocalMode = true;
   const navigate = useNavigate();
   const location = useLocation();
@@ -571,6 +583,31 @@ export default function ChatPage() {
     }
   };
 
+  const handleResumeUpload = async (file: File) => {
+    setResumeUploadError(null);
+    setResumeUploading(true);
+
+    try {
+      const response = await uploadDocument(file, 'resume');
+      if (response.code === 200 && response.data) {
+        const newResume: UploadedResume = {
+          name: response.data.originalFileName,
+          url: response.data.url,
+          size: response.data.size,
+          uploadedAt: new Date().toLocaleDateString('zh-CN'),
+        };
+        const updatedResumes = [newResume, ...uploadedResumes];
+        setUploadedResumes(updatedResumes);
+        localStorage.setItem('uploaded_resumes', JSON.stringify(updatedResumes));
+      }
+    } catch (error: any) {
+      const errorMessage = error?.message || '简历上传失败';
+      setResumeUploadError(errorMessage.replace(/^Error: /, ''));
+    } finally {
+      setResumeUploading(false);
+    }
+  };
+
   const hasMessages = displayMessages.length > 0;
   const currentConvId = currentLocalConvId;
   const currentTitle = currentConvId
@@ -684,6 +721,23 @@ export default function ChatPage() {
                       {userRoleLabel}
                     </span>
                   </span>
+                </button>
+
+                <button
+                  onClick={() => setShowResumePanel(true)}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-transparent px-2.5 py-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
+                  title="简历管理"
+                  aria-label="打开简历管理面板"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span className="hidden sm:inline">简历</span>
+                  {uploadedResumes.length > 0 && (
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent-600)] text-[10px] font-semibold text-white">
+                      {uploadedResumes.length}
+                    </span>
+                  )}
                 </button>
               </div>
             </header>
@@ -802,6 +856,44 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 简历管理面板 */}
+      {showResumePanel && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
+            onClick={() => setShowResumePanel(false)}
+            aria-hidden="true"
+          />
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-raised)] shadow-[var(--shadow-soft)] transition-transform">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
+              <h2 className="text-base font-medium text-[var(--text-primary)]">简历管理</h2>
+              <button
+                onClick={() => setShowResumePanel(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
+                aria-label="关闭简历管理面板"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="scrollbar-thon flex-1 overflow-y-auto overscroll-y-contain p-4">
+              <p className="mb-4 text-sm text-[var(--text-secondary)]">
+                上传和管理你的简历文件，支持 PDF 格式，最大 20MB。
+              </p>
+
+              <ResumeUpload
+                onUpload={handleResumeUpload}
+                resumes={uploadedResumes}
+                uploading={resumeUploading}
+                error={resumeUploadError}
+              />
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
