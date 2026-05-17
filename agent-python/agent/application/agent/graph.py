@@ -14,6 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from ...core.abort import AbortController
 from ...domain.entities import AgentState, Message
 from ...domain.protocols import ConversationRepository, LLMGateway, StreamEvent
+from ...services.pdf_service import PdfService
 from .nodes import (
     create_fetch_history_node,
     create_generate_reply_node,
@@ -36,10 +37,12 @@ class JobAgentGraph:
         self,
         repository: ConversationRepository,
         llm_gateway: LLMGateway,
+        pdf_service: PdfService | None = None,
         abort_controller: AbortController | None = None,
     ):
         self._repository = repository
         self._llm_gateway = llm_gateway
+        self._pdf_service = pdf_service
         self._abort_controller = abort_controller
         self._graph = self._build_graph()
 
@@ -115,6 +118,8 @@ class JobAgentGraph:
         system_prompt: str = "",
         message_id: str | None = None,
         request_id: str | None = None,
+        resume_bucket: str | None = None,
+        resume_key: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """
         执行 Agent 工作流（流式）
@@ -155,11 +160,22 @@ class JobAgentGraph:
         # 1. 获取历史消息（简化处理，暂不获取）
         history: list[Message] = []
 
+        # 1.1 处理简历内容
+        resume_text = ""
+        if resume_bucket and resume_key and self._pdf_service:
+            try:
+                parsed = self._pdf_service.parse_pdf_from_storage(resume_bucket, resume_key)
+                resume_text = parsed.cleaned_text
+                logger.info(f"成功关联简历内容 | length={len(resume_text)}")
+            except Exception as e:
+                logger.warning(f"解析简历失败 | bucket={resume_bucket} | key={resume_key} | error={e}")
+
         # 2. 构建消息上下文
         messages = self._build_messages_for_stream(
             user_message=user_message,
             history=history,
             system_prompt=system_prompt,
+            resume_text=resume_text,
         )
 
         # 3. 流式调用 LLM，逐 chunk yield，每次检查 abort
@@ -179,6 +195,7 @@ class JobAgentGraph:
         user_message: str,
         history: list[Message],
         system_prompt: str = "",
+        resume_text: str = "",
     ) -> list[Message]:
         """构建流式模式的消息列表"""
         from ...domain.entities import Message
@@ -188,6 +205,13 @@ class JobAgentGraph:
 
         # System prompt
         prompt = system_prompt or SYSTEM_PROMPT
+        if resume_text:
+            prompt += (
+                f"\n\n用户当前关联的简历内容如下：\n"
+                f"<resume_content>\n{resume_text}\n</resume_content>\n"
+                f"请根据该简历内容回答用户的问题，并提供职业建议。"
+            )
+
         messages.append(Message(role="system", content=prompt))
 
         # 历史消息

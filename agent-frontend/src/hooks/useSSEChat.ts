@@ -22,7 +22,7 @@ interface UseSSEChatReturn {
   error: string | null;
   conversationId: number | null;
   messageId: string | null;
-  sendMessage: (message: string, conversationId?: number) => void;
+  sendMessage: (message: string, conversationId?: number, resumeId?: number) => void;
   abortStream: () => void;
   clearMessages: () => void;
   resetChatState: () => void;
@@ -159,7 +159,7 @@ export function useSSEChat(): UseSSEChatReturn {
   }, []);
 
   const sendMessage = useCallback(
-    async (message: string, convId?: number) => {
+    async (message: string, convId?: number, resumeId?: number) => {
       if (!message.trim() || isLoadingRef.current) {
         return;
       }
@@ -286,7 +286,8 @@ export function useSSEChat(): UseSSEChatReturn {
           message.trim(),
           effectiveConvId,
           handlers,
-          abortController.signal
+          abortController.signal,
+          resumeId
         );
       } catch (sendError) {
         if (abortController.signal.aborted) {

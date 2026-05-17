@@ -7,6 +7,8 @@ import com.caius.agent.module.agent.config.AbortManager;
 import com.caius.agent.module.agent.dto.StreamChatRequest;
 import com.caius.agent.module.agent.model.SseEvent;
 import com.caius.agent.module.agent.service.StreamChatService;
+import com.caius.agent.module.user.service.ResumeService;
+import com.caius.agent.module.user.entity.UserResume;
 import com.caius.agent.module.conversation.entity.Conversation;
 import com.caius.agent.module.conversation.entity.Message;
 import com.caius.agent.module.conversation.service.ConversationOwnershipService;
@@ -61,6 +63,7 @@ public class StreamChatServiceImpl implements StreamChatService {
     private final AbortManager abortManager;
     private final ConversationOwnershipService conversationOwnershipService;
     private final UserScopedCacheKeyFactory cacheKeyFactory;
+    private final ResumeService resumeService;
 
     @Value("${streaming.max-chunks-per-message:5000}")
     private int maxChunksPerMessage;
@@ -736,6 +739,21 @@ public class StreamChatServiceImpl implements StreamChatService {
         // ⭐ v2 协议：传入 message_id 和 request_id
         body.put("message_id", messageId);
         if (requestId != null) body.put("request_id", requestId);
+
+        // 如果传了 resumeId，获取简历存储信息并传给 Python
+        if (request.getResumeId() != null) {
+            try {
+                UserResume resume = resumeService.getById(request.getResumeId());
+                if (resume != null && resume.getUserId().equals(userId)) {
+                    body.put("resume_bucket", resume.getBucket());
+                    body.put("resume_key", resume.getObjectKey());
+                    log.info("[流式] 已关联简历信息: bucket={}, key={}", resume.getBucket(), resume.getObjectKey());
+                }
+            } catch (Exception e) {
+                log.warn("[流式] 获取简历信息失败, resumeId={}", request.getResumeId(), e);
+            }
+        }
+
         return body;
     }
 

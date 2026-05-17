@@ -97,8 +97,12 @@ export default function ChatPage() {
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const [resumeUploading, setResumeUploading] = useState(false);
   const [resumeUploadError, setResumeUploadError] = useState<string | null>(null);
-  const [uploadedResumes, setUploadedResumes] = useState<UploadedResume[]>([]);
-  const [showResumePanel, setShowResumePanel] = useState(false);
+  const [uploadedResumes, setUploadedResumes] = useState<Resume[]>([]);
+  const [activeResumeId, setActiveResumeId] = useState<number | null>(null);
+  
+  const activeResume = useMemo(() => {
+    return uploadedResumes.find(r => r.id === activeResumeId) || null;
+  }, [uploadedResumes, activeResumeId]);
   const useLocalMode = true;
   const navigate = useNavigate();
   const location = useLocation();
@@ -177,12 +181,11 @@ export default function ChatPage() {
       try {
         const response = await getResumeList();
         if (!cancelled && response.code === 200 && response.data) {
-          setUploadedResumes(response.data.map(r => ({
-            name: r.name,
-            url: r.url,
-            size: r.size,
-            uploadedAt: new Date(r.uploadedAt).toLocaleDateString('zh-CN'),
-          })));
+          const resumes = response.data;
+          setUploadedResumes(resumes);
+          if (resumes.length > 0) {
+            setActiveResumeId(resumes[0].id);
+          }
         }
       } catch (error) {
         console.warn('[ChatPage] 获取简历列表失败:', error);
@@ -324,7 +327,11 @@ export default function ChatPage() {
       activeConversation?.id ??
       undefined;
 
-    sendMessage(message, effectiveRemoteConversationId);
+    sendMessage(
+      message,
+      effectiveRemoteConversationId ? Number(effectiveRemoteConversationId) : undefined,
+      activeResumeId || undefined
+    );
 
     // 发送消息后恢复自动滚动
     shouldAutoScrollRef.current = true;
@@ -600,12 +607,11 @@ export default function ChatPage() {
       if (response.code === 200) {
         const listResponse = await getResumeList();
         if (listResponse.code === 200 && listResponse.data) {
-          setUploadedResumes(listResponse.data.map(r => ({
-            name: r.name,
-            url: r.url,
-            size: r.size,
-            uploadedAt: new Date(r.uploadedAt).toLocaleDateString('zh-CN'),
-          })));
+          const resumes = listResponse.data;
+          setUploadedResumes(resumes);
+          if (resumes.length > 0) {
+            setActiveResumeId(resumes[0].id);
+          }
         }
       }
     } catch (error: any) {
@@ -672,84 +678,41 @@ export default function ChatPage() {
         ) : (
           <>
             {/* 顶部导航栏 */}
-            <header className="relative shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(247,247,245,0.88)] backdrop-blur-sm">
-              <SoftGridMotion className="pointer-events-none absolute inset-0" opacity={0.18} />
+            <header className="relative shrink-0 bg-transparent">
               <div
-                className="relative flex items-center justify-between gap-2 px-3 pb-2.5 pt-2 sm:px-4"
-                style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }}
+                className="relative flex items-center justify-between gap-2 px-4 pb-2 pt-4"
+                style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 1rem)' }}
               >
-                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+                <div className="flex min-w-0 items-center gap-2">
                   {/* 移动端菜单按钮 */}
                   <button
                     onClick={() => setIsMobileSidebarOpen(true)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)] lg:hidden"
-                    aria-label="打开会话列表"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-soft)] lg:hidden"
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16" />
                     </svg>
                   </button>
 
-                  <div className="min-w-0">
-                    <h1 className="truncate text-sm font-medium text-[var(--text-primary)] sm:max-w-xs">
-                      {currentTitle || '未命名会话'}
-                    </h1>
-                    {isLoading ? (
-                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                        <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-[var(--accent-500)]" />
-                        正在处理...
-                      </p>
-                    ) : (
-                      <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                        {hasMessages ? '继续当前会话' : '创建第一条会话'}
-                      </p>
-                    )}
-                  </div>
+                  <h1 className="truncate text-lg font-medium text-[var(--text-primary)]">
+                    {currentTitle || '新对话'}
+                  </h1>
                 </div>
 
-                <button
-                  onClick={handleOpenProfile}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-transparent px-2.5 py-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
-                  title={profileUser ? `${profileUser.username} · ${profileUser.role}` : '等待后端用户信息'}
-                  aria-label="查看个人资料"
-                >
-                  <span className="inline-flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-[var(--surface-soft)] text-xs font-medium text-[var(--text-secondary)]">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleOpenProfile}
+                    className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] transition-transform hover:scale-105 active:scale-95"
+                  >
                     {profileUser?.avatarUrl ? (
-                      <img
-                        src={profileUser.avatarUrl}
-                        alt={`${profileUser.username} 头像`}
-                        className="h-full w-full object-cover"
-                      />
+                      <img src={profileUser.avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
-                      profileUser ? profileUser.username.slice(0, 1).toUpperCase() : '?'
+                      <span className="text-xs font-bold text-[var(--text-secondary)]">
+                        {profileUser ? profileUser.username.slice(0, 1).toUpperCase() : '?'}
+                      </span>
                     )}
-                  </span>
-                  <span className="hidden min-w-0 sm:flex sm:flex-col sm:items-start sm:leading-tight">
-                    <span className="max-w-32 truncate text-sm text-[var(--text-primary)]">
-                      {profileUser ? username : '未加载用户'}
-                    </span>
-                    <span className="text-[11px] text-[var(--text-muted)]">
-                      {userRoleLabel}
-                    </span>
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => setShowResumePanel(true)}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-transparent px-2.5 py-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
-                  title="简历管理"
-                  aria-label="打开简历管理面板"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span className="hidden sm:inline">简历</span>
-                  {uploadedResumes.length > 0 && (
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent-600)] text-[10px] font-semibold text-white">
-                      {uploadedResumes.length}
-                    </span>
-                  )}
-                </button>
+                  </button>
+                </div>
               </div>
             </header>
 
@@ -763,19 +726,29 @@ export default function ChatPage() {
                   <MessageSkeleton count={3} />
                 </div>
               ) : !hasMessages ? (
-                <div className="flex h-full items-center justify-center px-4">
-                  <div className="relative w-full max-w-xl overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-6 py-10 text-center shadow-[var(--shadow-soft)] sm:px-10">
-                    <div className="pointer-events-none absolute inset-0">
-                      <EmptyStateMotion className="absolute inset-0" opacity={0.5} />
-                    </div>
-                    <div className="relative">
-                      <h2 className="mb-3 text-[1.6rem] font-semibold tracking-tight text-[var(--text-primary)] sm:text-2xl">
-                        开始管理你的求职会话
-                      </h2>
-                      <p className="mb-1 text-sm text-[var(--text-secondary)]">
-                        先输入一个目标岗位或简历准备问题，逐步记录你的求职进度。
-                      </p>
-                      <p className="text-xs text-[var(--text-muted)]">例如：整理前端岗位投递优先级</p>
+                <div className="flex h-full flex-col items-center justify-center px-4 pb-20">
+                  <div className="w-full max-w-2xl animate-in fade-in zoom-in-95 duration-700">
+                    <h2 className="mb-4 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-4xl font-bold tracking-tight text-transparent sm:text-5xl">
+                      你好，{username || '朋友'}
+                    </h2>
+                    <p className="text-xl font-medium text-[var(--text-secondary)] sm:text-2xl">
+                      我是你的 AI 求职助手，今天想聊聊什么？
+                    </p>
+                    <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button 
+                        onClick={() => handleSend('帮我优化目前的简历内容')}
+                        className="flex flex-col items-start rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left transition-all hover:bg-[var(--surface-soft)] hover:shadow-md"
+                      >
+                        <span className="text-sm font-medium text-[var(--text-primary)]">简历优化</span>
+                        <span className="text-xs text-[var(--text-muted)]">提升经历描述的专业度</span>
+                      </button>
+                      <button 
+                        onClick={() => handleSend('根据我的背景推荐适合的岗位')}
+                        className="flex flex-col items-start rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left transition-all hover:bg-[var(--surface-soft)] hover:shadow-md"
+                      >
+                        <span className="text-sm font-medium text-[var(--text-primary)]">背景分析</span>
+                        <span className="text-xs text-[var(--text-muted)]">挖掘你的核心竞争力</span>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -818,6 +791,9 @@ export default function ChatPage() {
               disabled={userDisabled}
               placeholder={hasMessages ? '继续输入...' : '输入岗位、简历或投递相关问题...'}
               autoFocus={!hasMessages}
+              activeResume={activeResume ? { id: activeResume.id, name: activeResume.name } : null}
+              onFileUpload={handleResumeUpload}
+              onRemoveResume={() => setActiveResumeId(null)}
             />
           </>
         )}
@@ -867,44 +843,6 @@ export default function ChatPage() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* 简历管理面板 */}
-      {showResumePanel && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
-            onClick={() => setShowResumePanel(false)}
-            aria-hidden="true"
-          />
-          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-raised)] shadow-[var(--shadow-soft)] transition-transform">
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
-              <h2 className="text-base font-medium text-[var(--text-primary)]">简历管理</h2>
-              <button
-                onClick={() => setShowResumePanel(false)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
-                aria-label="关闭简历管理面板"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="scrollbar-thon flex-1 overflow-y-auto overscroll-y-contain p-4">
-              <p className="mb-4 text-sm text-[var(--text-secondary)]">
-                上传和管理你的简历文件，支持 PDF 格式，最大 20MB。
-              </p>
-
-              <ResumeUpload
-                onUpload={handleResumeUpload}
-                resumes={uploadedResumes}
-                uploading={resumeUploading}
-                error={resumeUploadError}
-              />
-            </div>
-          </div>
-        </>
       )}
     </div>
   );

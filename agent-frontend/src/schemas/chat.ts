@@ -11,6 +11,7 @@ export const streamChatParamsSchema = z.object({
   message: requestMessageSchema,
   conversationId: idSchema.optional(),
   sessionId: z.string().optional(),
+  resumeId: idSchema.optional(),
 });
 
 export const recoverStreamParamsSchema = z.object({

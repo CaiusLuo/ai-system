@@ -21,4 +21,6 @@ public class StreamChatRequest {
     private String sessionId;
 
     private Long conversationId;
+
+    private Long resumeId;
 }

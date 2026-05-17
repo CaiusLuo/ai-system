@@ -157,6 +157,8 @@ async def _stream_generator(
             conversation_id=request.conversation_id,
             message_id=message_id,
             request_id=request_id,
+            resume_bucket=request.resume_bucket,
+            resume_key=request.resume_key,
         ):
             # 检查是否需要发送 ping 心跳（每 15 秒）
             current_time = asyncio.get_running_loop().time()

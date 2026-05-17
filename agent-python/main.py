@@ -33,6 +33,8 @@ from agent.core.logging import setup_logging
 from agent.core.middleware import RequestLoggingMiddleware, setup_cors
 from agent.infrastructure.external.java_backend_client import JavaBackendClient
 from agent.infrastructure.llm.deepseek_service import DeepSeekService
+from agent.services.pdf_service import PdfService
+from agent.services.storage_service import MinioStorageService
 
 
 class AppState:
@@ -75,6 +77,14 @@ async def lifespan(app: FastAPI):
         timeout=settings.java_backend_timeout,
     )
 
+    storage_service = MinioStorageService(
+        endpoint=settings.oss_endpoint or "127.0.0.1:9000",
+        access_key=settings.oss_access_key or "minioadmin",
+        secret_key=settings.oss_secret_key or "minioadmin",
+        secure=settings.oss_secure,
+    )
+    pdf_service = PdfService(storage_service=storage_service)
+
     if settings.has_llm_config():
         llm_service = DeepSeekService(
             api_key=settings.deepseek_api_key or "",
@@ -89,6 +99,7 @@ async def lifespan(app: FastAPI):
         app_state.agent_graph = JobAgentGraph(
             repository=java_client,
             llm_gateway=llm_service,
+            pdf_service=pdf_service,
             abort_controller=app_state.abort_controller,
         )
     else:

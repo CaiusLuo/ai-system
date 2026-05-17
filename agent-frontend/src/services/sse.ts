@@ -227,7 +227,8 @@ export async function createSSEConnection(
   message: string,
   conversationId: number | undefined,
   handlers: SSEHandlers,
-  signal: AbortSignal
+  signal: AbortSignal,
+  resumeId?: number
 ): Promise<void> {
   const authStatus = getAuthStatus();
   if (authStatus === 'expired') {
@@ -245,6 +246,7 @@ export async function createSSEConnection(
   const requestBody = streamChatParamsSchema.parse({
     message,
     ...(conversationId !== undefined ? { conversationId } : {}),
+    ...(resumeId !== undefined ? { resumeId } : {}),
   });
 
   let response: Response;

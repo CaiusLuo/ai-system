@@ -32,6 +32,8 @@ class ChatStreamRequest(BaseModel):
         description="消息唯一标识，由 Java 后端生成，用于 chunk 归并和 abort",
     )
     request_id: str | None = Field(None, description="请求追踪 ID，可选")
+    resume_bucket: str | None = Field(None, description="简历存储 bucket")
+    resume_key: str | None = Field(None, description="简历存储 key")
     stream: bool = Field(True, description="是否启用流式输出，固定为 true")
 
 
