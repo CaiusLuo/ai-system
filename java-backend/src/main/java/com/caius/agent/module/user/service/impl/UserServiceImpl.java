@@ -85,6 +85,17 @@ public class UserServiceImpl implements UserService {
         existUser.setAvatarObjectKey(avatarObjectKey);
         userMapper.updateById(existUser);
     }
+
+    @Override
+    public void updateActiveResume(Long userId, Long resumeId) {
+        User existUser = userMapper.selectById(userId);
+        if (existUser == null) {
+            throw new BusinessException("用户不存在");
+        }
+
+        existUser.setActiveResumeId(resumeId);
+        userMapper.updateById(existUser);
+    }
     
     /**
      * 转换为 DTO
