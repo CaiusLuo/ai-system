@@ -23,7 +23,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy only manifest files to leverage layer caching
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r <(uv export --format requirements-txt)
+    uv export --format requirements-txt > requirements.txt && \
+    uv pip install -r requirements.txt
 
 # ==========================================
 # Phase 2: Runtime (Clean & Slim)
