@@ -652,6 +652,7 @@ export default function ChatPage() {
         onOpenAdmin={handleOpenAdmin}
         onLogout={handleLogout}
         onUploadAvatar={handleAvatarUpload}
+        onOpenProfile={handleOpenProfile}
         avatarUploading={avatarUploading}
         avatarUploadError={avatarUploadError}
         canCreateConversation={!userDisabled}

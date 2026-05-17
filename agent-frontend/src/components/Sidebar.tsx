@@ -27,6 +27,7 @@ interface SidebarProps {
   avatarUploadError?: string | null;
   canCreateConversation?: boolean;
   onOpenAgentSettings?: () => void;
+  onOpenProfile?: () => void;
   agentName?: string;
 }
 
@@ -53,6 +54,7 @@ export default function Sidebar({
   avatarUploadError,
   canCreateConversation = true,
   onOpenAgentSettings,
+  onOpenProfile,
   agentName = '工作台',
 }: SidebarProps) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -377,14 +379,24 @@ export default function Sidebar({
                   <p className={`truncate text-[11px] ${userDisabled ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
                     {userRoleLabel} · {userStatusLabel}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => avatarInputRef.current?.click()}
-                    disabled={avatarUploading}
-                    className="mt-1 text-[11px] font-medium text-[var(--accent-700)] transition-colors hover:text-[var(--accent-800)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)]"
-                  >
-                    {avatarUploading ? '头像上传中...' : '更换头像'}
-                  </button>
+                  <div className="mt-1 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => avatarInputRef.current?.click()}
+                      disabled={avatarUploading}
+                      className="text-[11px] font-medium text-[var(--accent-700)] transition-colors hover:text-[var(--accent-800)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)]"
+                    >
+                      {avatarUploading ? '上传中...' : '更换头像'}
+                    </button>
+                    <span className="text-[10px] text-[var(--border-subtle)]">|</span>
+                    <button
+                      type="button"
+                      onClick={onOpenProfile}
+                      className="text-[11px] font-medium text-[var(--accent-700)] transition-colors hover:text-[var(--accent-800)]"
+                    >
+                      编辑资料
+                    </button>
+                  </div>
                 </div>
               </div>
 
