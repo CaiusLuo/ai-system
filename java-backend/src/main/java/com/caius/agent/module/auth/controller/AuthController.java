@@ -68,6 +68,7 @@ public class AuthController {
         data.put("username", user != null ? user.getUsername() : jwtUtil.getUsername(token));
         data.put("role", user != null ? user.getRole() : jwtUtil.getRole(token));
         if (user != null) {
+            data.put("email", user.getEmail());
             data.put("avatarUrl", avatarUrlResolver.resolve(user));
             data.put("status", user.getStatus());
             data.put("statusText", user.getStatus() != null && user.getStatus() == 1 ? "ACTIVE" : "DISABLED");

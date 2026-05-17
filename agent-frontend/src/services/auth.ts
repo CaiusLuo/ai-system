@@ -139,6 +139,7 @@ export function setUserInfo(info: StoredUserInfo): void {
   setStoredCurrentUser({
     userId: userInfo.userId,
     username: userInfo.username,
+    email: userInfo.email,
     avatarUrl: userInfo.avatarUrl,
     role: userInfo.role,
     ...(userInfo.status
@@ -159,6 +160,7 @@ export function getUserInfo(): StoredUserInfo | null {
   const parsed = storedUserInfoSchema.safeParse({
     userId: currentUser.userId,
     username: currentUser.username,
+    email: currentUser.email,
     avatarUrl: currentUser.avatarUrl,
     role: currentUser.role,
     status: normalizeUserStatus(currentUser.status, currentUser.statusText),
