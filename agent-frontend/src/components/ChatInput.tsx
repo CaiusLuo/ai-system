@@ -8,7 +8,6 @@ interface ChatInputProps {
   placeholder?: string;
   autoFocus?: boolean;
   activeResume?: { id: number; name: string } | null;
-  onUploadClick?: () => void;
   onRemoveResume?: () => void;
 }
 
@@ -20,7 +19,6 @@ export default function ChatInput({
   placeholder = '输入你的问题...',
   autoFocus = false,
   activeResume = null,
-  onUploadClick,
   onRemoveResume,
   onFileUpload,
 }: ChatInputProps & { onFileUpload?: (file: File) => void }) {

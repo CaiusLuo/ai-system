@@ -14,15 +14,13 @@ import {
   deleteConversation as deleteRemoteConversation,
 } from '../services/conversation';
 import { uploadAvatar as uploadAvatarFile, uploadDocument } from '../services/storage';
-import { getResumeList } from '../services/resume';
-import ResumeUpload, { type UploadedResume } from '../components/ResumeUpload';
+import { getResumeList, type Resume } from '../services/resume';
 import type {
   LocalConversationSummary,
   Message,
   StoredCurrentUser,
   StoredMessage,
 } from '../types';
-import { EmptyStateMotion, SoftGridMotion } from '../remotion';
 
 // 本地消息转换为 Message 格式
 function storedToMessage(msg: StoredMessage): Message {
@@ -95,8 +93,6 @@ export default function ChatPage() {
   const [tempAgentName, setTempAgentName] = useState('');
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
-  const [resumeUploading, setResumeUploading] = useState(false);
-  const [resumeUploadError, setResumeUploadError] = useState<string | null>(null);
   const [uploadedResumes, setUploadedResumes] = useState<Resume[]>([]);
   const [activeResumeId, setActiveResumeId] = useState<number | null>(null);
   
@@ -118,11 +114,6 @@ export default function ChatPage() {
       : null;
   const username = profileUser?.username ?? '';
   const userRole = currentUser?.role ?? '';
-  const userRoleLabel = profileUser
-    ? profileUser.role === 'ADMIN'
-      ? '管理员'
-      : '普通用户'
-    : '用户资料同步中';
   const userDisabled = profileUser?.status === 0 || profileUser?.statusText === 'DISABLED';
 
   const refreshLocalConvList = useCallback(() => {
@@ -599,9 +590,6 @@ export default function ChatPage() {
   };
 
   const handleResumeUpload = async (file: File) => {
-    setResumeUploadError(null);
-    setResumeUploading(true);
-
     try {
       const response = await uploadDocument(file, 'resume');
       if (response.code === 200) {
@@ -615,10 +603,7 @@ export default function ChatPage() {
         }
       }
     } catch (error: any) {
-      const errorMessage = error?.message || '简历上传失败';
-      setResumeUploadError(errorMessage.replace(/^Error: /, ''));
-    } finally {
-      setResumeUploading(false);
+      console.error('[ChatPage] 简历上传失败:', error);
     }
   };
 
