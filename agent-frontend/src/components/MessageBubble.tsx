@@ -19,15 +19,27 @@ function WorkspaceAvatar() {
   );
 }
 
-function UserAvatar() {
+function UserAvatar({ avatarUrl, username }: { avatarUrl?: string | null; username?: string }) {
+  const [loadFailed, setLoadFailed] = useState(false);
+  const initial = (username || 'U').trim().slice(0, 1).toUpperCase();
+
+  if (avatarUrl && !loadFailed) {
+    return (
+      <div className="h-6 w-6 flex-shrink-0 overflow-hidden rounded-full border border-[var(--border-subtle)] sm:h-7 sm:w-7">
+        <img
+          src={avatarUrl}
+          alt={username}
+          className="h-full w-full object-cover"
+          onError={() => setLoadFailed(true)}
+        />
+      </div>
+    );
+  }
+
   return (
-    <svg className="h-6 w-6 flex-shrink-0 sm:h-7 sm:w-7" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <rect width="32" height="32" rx="16" fill="#2F6A71" />
-      <g transform="translate(6, 4)">
-        <circle cx="10" cy="6" r="4.5" fill="white" />
-        <path d="M2 22 Q2 15 10 15 Q18 15 18 22" fill="white" />
-      </g>
-    </svg>
+    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[var(--accent-700)] text-[10px] font-bold text-white sm:h-7 sm:w-7 sm:text-xs">
+      {initial}
+    </div>
   );
 }
 
@@ -35,6 +47,19 @@ const MessageBubble = memo(function MessageBubble({ message, isStreaming: _isStr
   const isUser = message.role === 'user';
   const [showReasoning, setShowReasoning] = useState(false);
   const [displayContent, setDisplayContent] = useState('');
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  useEffect(() => {
+    // 从 localStorage 获取当前用户信息，以便在消息气泡中显示头像
+    const rawUser = localStorage.getItem('currentUser');
+    if (rawUser) {
+      try {
+        setCurrentUser(JSON.parse(rawUser));
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, []);
 
   const hasReasoning = !!message.reasoning;
 
@@ -62,7 +87,7 @@ const MessageBubble = memo(function MessageBubble({ message, isStreaming: _isStr
                 {message.content}
               </div>
             </div>
-            <UserAvatar />
+            <UserAvatar avatarUrl={currentUser?.avatarUrl} username={currentUser?.username} />
           </div>
         ) : (
           <div className="flex gap-2.5 sm:gap-3">

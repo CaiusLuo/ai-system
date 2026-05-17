@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Modal from './Modal';
 import { type StoredCurrentUser } from '../types';
 import { updateUserInfo } from '../services/auth';
+import { uploadAvatar as uploadAvatarFile } from '../services/storage';
 
 interface UserProfileModalProps {
   open: boolean;
@@ -17,6 +18,9 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ open, onClose, user
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (user) {
@@ -25,8 +29,38 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ open, onClose, user
       setPassword('');
       setConfirmPassword('');
       setError(null);
+      setAvatarLoadFailed(false);
     }
   }, [user, open]);
+
+  const handleAvatarClick = () => {
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setAvatarUploading(true);
+    setError(null);
+
+    try {
+      const response = await uploadAvatarFile(file);
+      if (response.code === 200) {
+        setAvatarLoadFailed(false);
+        onSuccess(); // 刷新用户信息
+      } else {
+        setError(response.message || '头像上传失败');
+      }
+    } catch (err: any) {
+      setError(err.message || '头像上传请求失败');
+    } finally {
+      setAvatarUploading(false);
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +94,9 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ open, onClose, user
     }
   };
 
+  const avatarInitial = (username || user?.username || 'U').trim().slice(0, 1).toUpperCase();
+  const showAvatarImage = user?.avatarUrl && !avatarLoadFailed;
+
   return (
     <Modal
       open={open}
@@ -77,7 +114,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ open, onClose, user
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={loading || avatarUploading}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none disabled:bg-blue-400"
           >
             {loading ? '保存中...' : '保存修改'}
@@ -85,6 +122,49 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ open, onClose, user
         </>
       }
     >
+      <div className="flex flex-col items-center mb-6">
+        <div className="relative">
+          <button
+            onClick={handleAvatarClick}
+            disabled={avatarUploading}
+            className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-2 border-gray-200 bg-gray-50 transition-colors hover:border-blue-400"
+          >
+            {showAvatarImage ? (
+              <img
+                src={user?.avatarUrl || ''}
+                alt="头像"
+                className="h-full w-full object-cover"
+                onError={() => setAvatarLoadFailed(true)}
+              />
+            ) : (
+              <span className="text-3xl font-bold text-gray-400">{avatarInitial}</span>
+            )}
+            {avatarUploading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              </div>
+            )}
+          </button>
+          <button
+            onClick={handleAvatarClick}
+            className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+        </div>
+        <input
+          ref={avatarInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleAvatarChange}
+        />
+        <p className="mt-2 text-xs text-gray-500">点击头像可更换</p>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md">
