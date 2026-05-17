@@ -7,19 +7,23 @@ FROM python:3.12-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
-# Install build essentials
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install build essentials with mount cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    curl
 
-# Create virtual environment and install dependencies
-RUN uv venv /opt/venv
+# Use virtual environment
 ENV VIRTUAL_ENV=/opt/venv
+RUN uv venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt .
-RUN uv pip install --no-cache -r requirements.txt
+# Install dependencies with mount cache for uv
+# Copy only manifest files to leverage layer caching
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r <(uv export --format requirements-txt)
 
 # ==========================================
 # Phase 2: Runtime (Clean & Slim)
@@ -27,10 +31,11 @@ RUN uv pip install --no-cache -r requirements.txt
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install runtime essentials
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install runtime essentials with mount cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    curl
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
