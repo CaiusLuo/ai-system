@@ -7,6 +7,7 @@ import MessageBubble from '../components/MessageBubble';
 import MessageSkeleton from '../components/MessageSkeleton';
 import ChatInput from '../components/ChatInput';
 import AdminPanel from './AdminPanel';
+import UserProfileModal from '../components/UserProfileModal';
 import { useDynamicViewportHeight } from '../hooks/useDynamicViewportHeight';
 import { logout, getCurrentUser, getStoredCurrentUser, AUTH_PAGE_PATH } from '../services/auth';
 import {
@@ -95,6 +96,7 @@ export default function ChatPage() {
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const [uploadedResumes, setUploadedResumes] = useState<Resume[]>([]);
   const [activeResumeId, setActiveResumeId] = useState<number | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   
   const activeResume = useMemo(() => {
     return uploadedResumes.find(r => r.id === activeResumeId) || null;
@@ -619,9 +621,13 @@ export default function ChatPage() {
   }, [viewportHeight]);
 
   const handleOpenProfile = () => {
-    if (profileUser) {
-      // 模拟管理员编辑自己的逻辑，或者未来跳转到个人资料页
-      console.log('[ChatPage] Open profile for user:', profileUser.username);
+    setShowProfileModal(true);
+  };
+
+  const handleProfileSuccess = async () => {
+    const me = await getCurrentUser();
+    if (me.code === 200 && me.data) {
+      setCurrentUser(me.data);
     }
   };
 
@@ -654,6 +660,14 @@ export default function ChatPage() {
           setShowAgentSettings(true);
         }}
         agentName={agentName}
+      />
+
+      {/* 用户资料模态框 */}
+      <UserProfileModal
+        open={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        user={profileUser}
+        onSuccess={handleProfileSuccess}
       />
 
       {/* 主聊天区域 */}
