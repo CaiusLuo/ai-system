@@ -628,7 +628,10 @@ export default function ChatPage() {
   }, [viewportHeight]);
 
   const handleOpenProfile = () => {
-    // 预留：后续接入用户个人资料页
+    if (profileUser) {
+      // 模拟管理员编辑自己的逻辑，或者未来跳转到个人资料页
+      console.log('[ChatPage] Open profile for user:', profileUser.username);
+    }
   };
 
   return (
