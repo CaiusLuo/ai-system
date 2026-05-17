@@ -15,10 +15,10 @@ def get_storage_service() -> MinioStorageService:
     """获取单例 MinIO 存储服务。"""
 
     return MinioStorageService(
-        endpoint=settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_secure,
+        endpoint=settings.oss_endpoint,
+        access_key=settings.oss_access_key,
+        secret_key=settings.oss_secret_key,
+        secure=settings.oss_secure,
     )
 
 

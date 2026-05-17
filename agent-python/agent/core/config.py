@@ -44,19 +44,19 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INTERNAL_API_TOKEN"),
     )
 
-    minio_endpoint: str = Field(
+    oss_endpoint: str = Field(
         default="127.0.0.1:9000",
         validation_alias=AliasChoices("OSS_ENDPOINT", "MINIO_ENDPOINT"),
     )
-    minio_access_key: str = Field(
+    oss_access_key: str = Field(
         default="minioadmin",
         validation_alias=AliasChoices("OSS_ACCESS_KEY", "MINIO_ACCESS_KEY"),
     )
-    minio_secret_key: str = Field(
+    oss_secret_key: str = Field(
         default="minioadmin",
         validation_alias=AliasChoices("OSS_SECRET_KEY", "MINIO_SECRET_KEY"),
     )
-    minio_secure: bool = Field(
+    oss_secure: bool = Field(
         default=False,
         validation_alias=AliasChoices("OSS_SECURE", "MINIO_SECURE"),
     )

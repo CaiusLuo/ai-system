@@ -78,9 +78,9 @@ async def lifespan(app: FastAPI):
     )
 
     storage_service = MinioStorageService(
-        endpoint=settings.oss_endpoint or "127.0.0.1:9000",
-        access_key=settings.oss_access_key or "minioadmin",
-        secret_key=settings.oss_secret_key or "minioadmin",
+        endpoint=settings.oss_endpoint,
+        access_key=settings.oss_access_key,
+        secret_key=settings.oss_secret_key,
         secure=settings.oss_secure,
     )
     pdf_service = PdfService(storage_service=storage_service)
