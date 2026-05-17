@@ -9,6 +9,7 @@ import com.caius.agent.module.admin.service.AdminUserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Admin 用户管理控制器
@@ -64,6 +65,17 @@ public class AdminUserController {
     @PatchMapping("/{id}/toggle-status")
     public Result<UserListResponse.UserDTO> toggleUserStatus(@PathVariable Long id) {
         UserListResponse.UserDTO user = adminUserService.toggleUserStatus(id);
+        return Result.success(user);
+    }
+
+    /**
+     * 更新用户头像
+     */
+    @PostMapping("/{id}/avatar")
+    public Result<UserListResponse.UserDTO> updateAvatar(
+            @PathVariable Long id,
+            @RequestParam("file") MultipartFile file) {
+        UserListResponse.UserDTO user = adminUserService.updateAvatar(id, file);
         return Result.success(user);
     }
 }

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS `user` (
     `password` VARCHAR(255) NOT NULL COMMENT '密码（加密）',
     `avatar_bucket` VARCHAR(100) DEFAULT NULL COMMENT '头像存储 bucket',
     `avatar_object_key` VARCHAR(512) DEFAULT NULL COMMENT '头像对象 key',
+    `active_resume_id` BIGINT DEFAULT NULL COMMENT '当前活跃简历ID',
     `role` VARCHAR(20) NOT NULL DEFAULT 'USER' COMMENT '角色：USER / ADMIN',
     `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态：0-禁用，1-启用',
     `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除：0-未删除，1-已删除',
@@ -53,6 +54,17 @@ CREATE TABLE IF NOT EXISTS `message` (
     KEY `idx_user_conversation_created_at` (`user_id`, `conversation_id`, `created_at`),
     KEY `idx_conversation_role` (`conversation_id`, `role`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
+
+-- 插入测试数据（密码为：admin123，使用 BCrypt 加密）
+INSERT INTO `user` (`username`, `email`, `password`, `role`) VALUES
+('admin', 'admin@example.com', '$2a$10$F2BoHbc61X.WAM/2wze8W.ppch4UUy57esdg9utaPJA2EYlapYvde', 'ADMIN'),
+('user', 'user@example.com', '$2a$10$F2BoHbc61X.WAM/2wze8W.ppch4UUy57esdg9utaPJA2EYlapYvde', 'USER');
+��',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_user_created_at` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户简历表';
 
 -- 插入测试数据（密码为：admin123，使用 BCrypt 加密）
 INSERT INTO `user` (`username`, `email`, `password`, `role`) VALUES

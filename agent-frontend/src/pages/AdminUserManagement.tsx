@@ -20,6 +20,7 @@ import {
   updateUser,
   deleteUser,
   toggleUserStatus,
+  updateUserAvatar,
   type UserListParams,
   type CreateUserParams,
   type UpdateUserParams,
@@ -63,6 +64,10 @@ const AdminUserManagement: React.FC = () => {
   
   // 消息提示
   const [message, setMessage] = useState<AdminFeedbackMessage | null>(null);
+  
+  // 头像上传
+  const avatarInputRef = React.useRef<HTMLInputElement>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   
   // 加载用户列表
   const loadUsers = async () => {
@@ -137,6 +142,29 @@ const AdminUserManagement: React.FC = () => {
     });
     setFormErrors({});
     setModalOpen(true);
+  };
+
+  // 处理头像上传
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingUser) return;
+
+    setAvatarUploading(true);
+    try {
+      const response = await updateUserAvatar(editingUser.id, file);
+      if (response.code === 200) {
+        showMessage('success', '头像更新成功');
+        // 更新正在编辑的用户对象，以便实时预览
+        setEditingUser(response.data);
+        // 刷新列表
+        loadUsers();
+      }
+    } catch (error: any) {
+      showMessage('error', error.message || '头像上传失败');
+    } finally {
+      setAvatarUploading(false);
+      if (e.target) e.target.value = '';
+    }
   };
   
   // 验证表单
@@ -472,6 +500,43 @@ const AdminUserManagement: React.FC = () => {
         }
       >
         <div className="space-y-4">
+          {editingUser && (
+            <div className="flex flex-col items-center justify-center pb-2">
+              <div className="relative group">
+                <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 border-gray-200 bg-gray-50 text-xl font-bold text-gray-400">
+                  {editingUser.avatarUrl ? (
+                    <img src={editingUser.avatarUrl} alt="预览" className="h-full w-full object-cover" />
+                  ) : (
+                    editingUser.username.slice(0, 1).toUpperCase()
+                  )}
+                  {avatarUploading && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full">
+                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition-colors"
+                  title="更换头像"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </button>
+              </div>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarChange}
+              />
+              <p className="mt-2 text-xs text-gray-500">点击图标更换用户头像</p>
+            </div>
+          )}
           <Input
             label="用户名"
             placeholder="请输入用户名"

@@ -14,6 +14,7 @@ import com.caius.agent.module.storage.enums.BucketType;
 import com.caius.agent.module.storage.service.StorageService;
 import com.caius.agent.module.storage.util.FileValidator;
 import com.caius.agent.module.storage.util.ObjectKeyGenerator;
+import com.caius.agent.module.user.service.ResumeService;
 import com.caius.agent.module.user.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,7 @@ public class StorageController {
     private final FileValidator fileValidator;
     private final MinioProperties minioProperties;
     private final UserService userService;
+    private final ResumeService resumeService;
 
     // ==================== 头像相关接口 ====================
 
@@ -96,8 +98,9 @@ public class StorageController {
         fileValidator.validateDocumentFile(file);
 
         // 校验 bizType
+        BizType type;
         try {
-            BizType.fromCode(bizType);
+            type = BizType.fromCode(bizType);
         } catch (IllegalArgumentException e) {
             return Result.error(400, "不支持的业务类型: " + bizType);
         }
@@ -123,6 +126,12 @@ public class StorageController {
                 .contentType(fileInfo.getContentType())
                 .originalFileName(file.getOriginalFilename())
                 .build();
+
+        // 如果是简历上传，持久化到数据库
+        if (type == BizType.RESUME) {
+            resumeService.saveResume(userId, file.getOriginalFilename(), 
+                    fileInfo.getBucket(), fileInfo.getObjectKey(), file.getSize());
+        }
 
         return Result.success(response);
     }

@@ -9,14 +9,23 @@ import com.caius.agent.module.admin.dto.UserListRequest;
 import com.caius.agent.module.admin.dto.UserListResponse;
 import com.caius.agent.module.admin.dto.UserUpdateRequest;
 import com.caius.agent.module.admin.service.AdminUserService;
+import com.caius.agent.module.storage.config.MinioProperties;
+import com.caius.agent.module.storage.dto.resp.FileInfoResponse;
+import com.caius.agent.module.storage.enums.BucketType;
+import com.caius.agent.module.storage.service.StorageService;
+import com.caius.agent.module.storage.util.FileValidator;
+import com.caius.agent.module.storage.util.ObjectKeyGenerator;
 import com.caius.agent.module.user.entity.User;
 import com.caius.agent.module.user.service.AvatarUrlResolver;
+import com.caius.agent.module.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -33,6 +42,10 @@ public class AdminUserServiceImpl implements AdminUserService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final AvatarUrlResolver avatarUrlResolver;
+    private final ObjectProvider<StorageService> storageServiceProvider;
+    private final FileValidator fileValidator;
+    private final MinioProperties minioProperties;
+    private final UserService userService;
 
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
@@ -220,6 +233,43 @@ public class AdminUserServiceImpl implements AdminUserService {
                 id, existUser.getUsername(), existUser.getStatus() == 1 ? "ACTIVE" : "DISABLED");
 
         return convertToDTO(existUser);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UserListResponse.UserDTO updateAvatar(Long id, MultipartFile file) {
+        User existUser = userMapper.selectById(id);
+        if (existUser == null || existUser.getDeleted() == 1) {
+            throw new BusinessException(404, "用户不存在");
+        }
+
+        // 校验文件
+        fileValidator.validateAvatarFile(file);
+
+        // 生成对象 Key
+        String extension = ObjectKeyGenerator.getExtension(file.getOriginalFilename());
+        String objectKey = ObjectKeyGenerator.generateAvatarKey(id, extension);
+
+        // 上传文件
+        FileInfoResponse fileInfo = storageService().upload(BucketType.AVATAR, file, objectKey, file.getContentType());
+
+        // 更新用户头像信息
+        userService.updateAvatar(id, fileInfo.getBucket(), fileInfo.getObjectKey());
+
+        log.info("管理员更新用户头像成功: id={}, username={}, bucket={}, key={}",
+                id, existUser.getUsername(), fileInfo.getBucket(), fileInfo.getObjectKey());
+
+        // 重新获取更新后的用户信息
+        User updatedUser = userMapper.selectById(id);
+        return convertToDTO(updatedUser);
+    }
+
+    private StorageService storageService() {
+        StorageService storageService = storageServiceProvider.getIfAvailable();
+        if (storageService == null) {
+            throw new BusinessException(500, "对象存储服务未初始化");
+        }
+        return storageService;
     }
 
     /**

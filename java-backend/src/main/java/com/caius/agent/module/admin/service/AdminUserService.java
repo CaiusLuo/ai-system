@@ -4,6 +4,7 @@ import com.caius.agent.module.admin.dto.UserCreateRequest;
 import com.caius.agent.module.admin.dto.UserListRequest;
 import com.caius.agent.module.admin.dto.UserListResponse;
 import com.caius.agent.module.admin.dto.UserUpdateRequest;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Admin 用户服务接口
@@ -34,4 +35,9 @@ public interface AdminUserService {
      * 切换用户状态
      */
     UserListResponse.UserDTO toggleUserStatus(Long id);
+
+    /**
+     * 更新用户头像
+     */
+    UserListResponse.UserDTO updateAvatar(Long id, MultipartFile file);
 }

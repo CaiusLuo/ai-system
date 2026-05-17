@@ -25,7 +25,6 @@ public class MinioConfig {
      * 创建 MinioClient Bean
      */
     @Bean
-    @Lazy
     public MinioClient minioClient() {
         MinioClient.Builder builder = MinioClient.builder()
                 .credentials(minioProperties.getAccessKey(), minioProperties.getSecretKey());
@@ -70,15 +69,23 @@ public class MinioConfig {
      * 初始化 Bucket：检查是否存在，不存在则创建
      */
     private void initBuckets(MinioClient client) {
-        minioProperties.getBuckets().forEach((key, bucketName) -> {
+        Map<String, String> buckets = minioProperties.getBuckets();
+        if (buckets == null || buckets.isEmpty()) {
+            log.warn("MinIO 未配置 Bucket 映射，跳过自动初始化");
+            return;
+        }
+
+        buckets.forEach((type, bucketName) -> {
+            if (!StringUtils.hasText(bucketName)) {
+                return;
+            }
             try {
                 boolean exists = client.bucketExists(
                         BucketExistsArgs.builder().bucket(bucketName).build());
                 if (!exists) {
+                    log.info("检测到 MinIO Bucket [{}] 不存在，正在创建...", bucketName);
                     client.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
                     log.info("MinIO Bucket [{}] 创建成功", bucketName);
-                } else {
-                    log.info("MinIO Bucket [{}] 已存在", bucketName);
                 }
             } catch (Exception e) {
                 log.error("MinIO Bucket [{}] 初始化失败", bucketName, e);

@@ -69,3 +69,12 @@ export async function toggleUserStatus(
 ): Promise<ApiResponse<AdminUserDTO>> {
   return api.patch(`${API_BASE}/${id}/toggle-status`, undefined, adminUserDtoSchema);
 }
+
+export async function updateUserAvatar(
+  id: number,
+  file: File
+): Promise<ApiResponse<AdminUserDTO>> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.postForm(`${API_BASE}/${id}/avatar`, formData, adminUserDtoSchema);
+}

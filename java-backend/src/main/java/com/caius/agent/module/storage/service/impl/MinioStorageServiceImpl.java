@@ -27,7 +27,6 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Service
-@Lazy
 @RequiredArgsConstructor
 public class MinioStorageServiceImpl implements StorageService {
 

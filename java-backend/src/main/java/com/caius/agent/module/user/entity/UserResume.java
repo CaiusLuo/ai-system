@@ -6,33 +6,24 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 用户实体
+ * 用户简历实体
  */
 @Data
-@TableName("user")
-public class User {
+@TableName("user_resume")
+public class UserResume {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String username;
+    private Long userId;
 
-    private String email;
+    private String fileName;
 
-    private String password;
+    private String bucket;
 
-    private String avatarBucket;
+    private String objectKey;
 
-    private String avatarObjectKey;
-
-    private Long activeResumeId;
-
-    private String role;
-
-    private Integer status;
-
-    @TableLogic
-    private Integer deleted;
+    private Long fileSize;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

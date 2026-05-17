@@ -14,6 +14,7 @@ import {
   deleteConversation as deleteRemoteConversation,
 } from '../services/conversation';
 import { uploadAvatar as uploadAvatarFile, uploadDocument } from '../services/storage';
+import { getResumeList } from '../services/resume';
 import ResumeUpload, { type UploadedResume } from '../components/ResumeUpload';
 import type {
   LocalConversationSummary,
@@ -96,14 +97,7 @@ export default function ChatPage() {
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const [resumeUploading, setResumeUploading] = useState(false);
   const [resumeUploadError, setResumeUploadError] = useState<string | null>(null);
-  const [uploadedResumes, setUploadedResumes] = useState<UploadedResume[]>(() => {
-    try {
-      const stored = localStorage.getItem('uploaded_resumes');
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [uploadedResumes, setUploadedResumes] = useState<UploadedResume[]>([]);
   const [showResumePanel, setShowResumePanel] = useState(false);
   const useLocalMode = true;
   const navigate = useNavigate();
@@ -178,6 +172,20 @@ export default function ChatPage() {
         }
       } catch (error) {
         console.warn('[ChatPage] 获取后端会话列表失败，继续使用本地缓存:', error);
+      }
+
+      try {
+        const response = await getResumeList();
+        if (!cancelled && response.code === 200 && response.data) {
+          setUploadedResumes(response.data.map(r => ({
+            name: r.name,
+            url: r.url,
+            size: r.size,
+            uploadedAt: new Date(r.uploadedAt).toLocaleDateString('zh-CN'),
+          })));
+        }
+      } catch (error) {
+        console.warn('[ChatPage] 获取简历列表失败:', error);
       }
     };
 
@@ -589,16 +597,16 @@ export default function ChatPage() {
 
     try {
       const response = await uploadDocument(file, 'resume');
-      if (response.code === 200 && response.data) {
-        const newResume: UploadedResume = {
-          name: response.data.originalFileName,
-          url: response.data.url,
-          size: response.data.size,
-          uploadedAt: new Date().toLocaleDateString('zh-CN'),
-        };
-        const updatedResumes = [newResume, ...uploadedResumes];
-        setUploadedResumes(updatedResumes);
-        localStorage.setItem('uploaded_resumes', JSON.stringify(updatedResumes));
+      if (response.code === 200) {
+        const listResponse = await getResumeList();
+        if (listResponse.code === 200 && listResponse.data) {
+          setUploadedResumes(listResponse.data.map(r => ({
+            name: r.name,
+            url: r.url,
+            size: r.size,
+            uploadedAt: new Date(r.uploadedAt).toLocaleDateString('zh-CN'),
+          })));
+        }
       }
     } catch (error: any) {
       const errorMessage = error?.message || '简历上传失败';

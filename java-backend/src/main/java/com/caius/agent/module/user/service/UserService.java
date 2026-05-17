@@ -22,4 +22,9 @@ public interface UserService {
      * 更新用户头像存储信息
      */
     void updateAvatar(Long userId, String avatarBucket, String avatarObjectKey);
+
+    /**
+     * 更新用户活跃简历 ID
+     */
+    void updateActiveResume(Long userId, Long resumeId);
 }
