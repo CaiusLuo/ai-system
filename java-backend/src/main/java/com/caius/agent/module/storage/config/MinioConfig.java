@@ -10,6 +10,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
 
+import java.util.Map;
+
 /**
  * MinIO 客户端配置类
  * 负责初始化 MinioClient 并自动检查/创建 Bucket
